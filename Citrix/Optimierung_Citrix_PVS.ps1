@@ -1,4 +1,19 @@
-﻿#================================================================================
+﻿<#
+.SYNOPSIS
+    Netzwerk- und Windows-Optimierung für Citrix PVS Target Devices.
+
+.DESCRIPTION
+    Führt Netzwerk- und Windows-Optimierung für Citrix PVS Target Devices durch,
+    inkl. Sicherung, GUI mit Live-Log und vollständigem Rollback.
+
+.NOTES
+    Version  : 4.8
+    Autor    : Rocco Ammon
+    Hinweis  : IP, Domäne und Servername sind bereits vorkonfiguriert.
+               Muss als Administrator ausgeführt werden!
+#>
+
+#================================================================================
 # Skript   : PVS2507-Optimierung.ps1
 # Zweck    : Netzwerk- und Windows-Optimierung für Citrix PVS Target Devices
 #            inkl. Sicherung, GUI mit Live-Log und vollständigem Rollback.
@@ -52,7 +67,7 @@ function Write-Log {
     # 2b) In Konsole schreiben (mit Farbe)
     switch ($Level) {
         'SUCCESS' { Write-Host $zeile -ForegroundColor DarkGreen }
-        'WARN'    { Write-Host $zeile -ForegroundColor DarkOrange }
+        'WARN'    { Write-Host $zeile -ForegroundColor DarkYellow }
         'ERROR'   { Write-Host $zeile -ForegroundColor Red }
         default   { Write-Host $zeile -ForegroundColor Black }
     }
@@ -194,7 +209,12 @@ function Start-Optimierung {
                 try {
                     $adv = Get-NetAdapterAdvancedProperty -Name $name -DisplayName $feature -ErrorAction Stop
                     $backup["Adapter"][$name]["Offloads"][$feature] = $adv.DisplayValue
-                    Set-NetAdapterAdvancedProperty -Name $name -DisplayName $feature -DisplayValue 'Disabled' -ErrorAction Stop
+                    try {
+                        Set-NetAdapterAdvancedProperty -Name $name -DisplayName $feature -DisplayValue 'Disabled' -ErrorAction Stop
+                    } catch {
+                        # Fallback: Jumbo Packet auf Minimalwert (1514 = Standard-MTU)
+                        Set-NetAdapterAdvancedProperty -Name $name -DisplayName $feature -DisplayValue '1514' -ErrorAction Stop
+                    }
                     Write-Log "  Deaktiviert: $feature" "SUCCESS"
                 }
                 catch { Write-Log "  Konnte '$feature' auf '$name' nicht ändern: $($_.Exception.Message)" "WARN" }
@@ -253,8 +273,16 @@ function Start-Optimierung {
         catch { Write-Log "Ruhezustand konnte nicht deaktiviert werden: $($_.Exception.Message)" "WARN" }
 
         #-- 4e) Backup speichern -----------------------------------------------
-        $backup | ConvertTo-Json -Depth 8 | Set-Content -Path $Global:BackupDatei -Encoding UTF8
-        Write-Log "Sicherung erfolgreich gespeichert unter: $Global:BackupDatei" "SUCCESS"
+        try {
+            $backup | ConvertTo-Json -Depth 8 | Set-Content -Path $Global:BackupDatei -Encoding UTF8 -ErrorAction Stop
+            if ((Test-Path $Global:BackupDatei) -and ((Get-Item $Global:BackupDatei).Length -gt 10)) {
+                Write-Log "Sicherung erfolgreich gespeichert unter: $Global:BackupDatei" "SUCCESS"
+            } else {
+                Write-Log "Backup-Datei wurde nicht oder unvollständig geschrieben: $Global:BackupDatei" "ERROR"
+            }
+        } catch {
+            Write-Log "Backup konnte nicht gespeichert werden: $($_.Exception.Message)" "ERROR"
+        }
 
         if ($rebootGesamt) {
             Write-Log "HINWEIS: Ein NEUSTART ist erforderlich, damit alle NIC-Einstellungen wirksam werden." "WARN"
