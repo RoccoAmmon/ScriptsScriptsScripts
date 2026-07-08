@@ -56,6 +56,7 @@ param (
 $ErrorActionPreference = 'Stop'
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { '.' }
 if (-not $OutputPath) { $OutputPath = Join-Path -Path $ScriptDir -ChildPath "ApplicationErrors.html" }
+$firstRun = $true
 
 do {
     $StartTime = (Get-Date).AddDays(-$DaysBack)
@@ -383,8 +384,9 @@ try {
     $Html.ToString() | Out-File -FilePath $OutputPath -Encoding utf8 -Force
     Write-Host "Report erstellt: $OutputPath" -ForegroundColor Green
 
-    if ((Get-Item $OutputPath).Length -gt 0 -and $Interval -eq 0) {
+    if ((Get-Item $OutputPath).Length -gt 0 -and $firstRun) {
         Start-Process $OutputPath
+        $firstRun = $false
     }
 }
 catch {
