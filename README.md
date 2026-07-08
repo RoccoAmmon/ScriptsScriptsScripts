@@ -12,7 +12,7 @@ Sammlung verschiedener PowerShell-Skripte für die Systemadministration.
 
 | Skript | Beschreibung |
 |--------|-------------|
-| `Application_Error_Eventlog.ps1` | Exportiert Application Error/Hang/Popup Eventlog-Einträge aller Server einer OU als HTML inkl. Ampelanzeige für Speicherplatz D: und mcsdif.vhdx-Größe. |
+| `Application_Error_Eventlog.ps1` | Exportiert Application Error/Hang/Popup Eventlog-Einträge aller Server einer OU als HTML inkl. Ampelanzeige für Speicherplatz D: und mcsdif.vhdx-Größe. Fehlermeldungen mit farbigen Hervorhebungen (EXE/DLL/Ausnahmecodes/OOM). |
 | `Optimierung_Citrix_PVS.ps1` | Netzwerk- und Windows-Optimierung für Citrix PVS Target Devices. Deaktiviert Offload-Features, erstellt Sicherungen und unterstützt Rollback. |
 
 ## Voraussetzungen

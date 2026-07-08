@@ -7,6 +7,8 @@
     "Application Error", "Application Hang" und "Application Popup" und exportiert sie
     übersichtlich als HTML-Datei (Uhrzeit, Server, Fehler). Zusätzlich werden freier
     Speicherplatz D: und Größe der mcsdif.vhdx als Ampelanzeige (rot/gelb/grün) dargestellt.
+    Fehlermeldungen enthalten farbige Hervorhebungen: EXE-Pfade (grün), DLL-Pfade (rot),
+    Ausnahmecodes (gelb) und "Nicht genügend virtueller Speicher" (rot).
 
 .PARAMETER SearchBase
     DistinguishedName der OU, in der nach Servern gesucht wird.
@@ -22,7 +24,7 @@
     -OutputPath "C:\Reports\errors.html" -DaysBack 14
 
 .NOTES
-    Version  : 1.0
+    Version  : 1.1
     Autor    : Rocco Ammon
 #>
 
@@ -32,7 +34,7 @@ param (
     [string]$SearchBase,
 
     [Parameter(Mandatory = $false)]
-    [string]$OutputPath = (Join-Path -Path $PSScriptRoot -ChildPath "ApplicationErrors.html"),
+    [string]$OutputPath,
 
     [Parameter(Mandatory = $false)]
     [int]$DaysBack = 7
@@ -40,6 +42,8 @@ param (
 
 # Region: Konfiguration
 $ErrorActionPreference = 'Stop'
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { '.' }
+if (-not $OutputPath) { $OutputPath = Join-Path -Path $ScriptDir -ChildPath "ApplicationErrors.html" }
 $StartTime = (Get-Date).AddDays(-$DaysBack)
 
 # Pro LogName die zu suchenden Provider (Quellen)
@@ -197,6 +201,10 @@ $StyleBlock = [System.Text.StringBuilder]::new()
 [void]$StyleBlock.AppendLine('    td.lv-Error { background-color: #fce4e4; }')
 [void]$StyleBlock.AppendLine('    td.lv-Warning { background-color: #fef9e7; }')
 [void]$StyleBlock.AppendLine('    td.lv-Information { background-color: #e8f4fd; }')
+[void]$StyleBlock.AppendLine('    td.msg-oom { background-color: #f8d7da; font-weight: 600; }')
+[void]$StyleBlock.AppendLine('    span.exe { background-color: #d4edda; color: #000; font-weight: 700; padding: 1px 4px; border-radius: 3px; }')
+[void]$StyleBlock.AppendLine('    span.dll { background-color: #f8d7da; color: #000; font-weight: 700; padding: 1px 4px; border-radius: 3px; }')
+[void]$StyleBlock.AppendLine('    span.excode { background-color: #fff3cd; color: #000; font-weight: 700; padding: 1px 4px; border-radius: 3px; }')
 [void]$StyleBlock.AppendLine('</style>')
 
 $ScriptBlock = [System.Text.StringBuilder]::new()
@@ -240,13 +248,39 @@ $HtmlHead = $StyleBlock.ToString() + "`r`n" + $ScriptBlock.ToString()
 $HtmlBodyErrors = $Results | Sort-Object Time -Descending | Select-Object @{N='Zeit';E={
     if ($_.Time) { $_.Time.ToString('dd.MM.yyyy HH:mm:ss') } else { '-' }
 }}, @{N='Server';E={ $_.Server }}, @{N='Level';E={ $_.Level }}, @{N='Quelle';E={ $_.Provider }}, @{N='Fehler';E={
-    $_.Message
+    $msg = $_.Message
+    # OOM-Marker setzen (für späteres CSS)
+    if ($msg -match '(Nicht genügend|Zu wenig|Out of memory|Virtual memory)') {
+        $msg = '__OOM__' + $msg
+    }
+    # EXE-Namen/Pfade (z.B. Winword.exe oder C:\...\Winword.exe) mit Marker umschließen
+    $msg = $msg -replace '(?:[A-Za-z]:\\[^<>:"|?*\n]+\.exe\b|\b\w+\.exe\b)', '__EXE__$&__/EXE__'
+    # DLL-Namen/Pfade (z.B. KERNELBASE.dll oder C:\...\PBVM.dll) mit Marker umschließen
+    $msg = $msg -replace '(?:[A-Za-z]:\\[^<>:"|?*\n]+\.dll\b|\b\w+\.dll\b)', '__DLL__$&__/DLL__'
+    # Ausnahmecodes (z.B. 0xe0000008) mit Marker umschließen
+    $msg = $msg -replace '\b0x[a-fA-F0-9]+\b', '__EXCODE__$&__/EXCODE__'
+    $msg
 }} | ConvertTo-Html -Fragment
 
 # Level-Zellen farblich markieren
 $HtmlBodyErrors = $HtmlBodyErrors -replace '<td>Error</td>',       '<td class="lv-Error">Error</td>'
 $HtmlBodyErrors = $HtmlBodyErrors -replace '<td>Warning</td>',     '<td class="lv-Warning">Warning</td>'
 $HtmlBodyErrors = $HtmlBodyErrors -replace '<td>Information</td>', '<td class="lv-Information">Information</td>'
+
+# Fehlerzelle bei virtueller Speicher hellrot (Marker durch Klasse ersetzen)
+$HtmlBodyErrors = $HtmlBodyErrors -replace '<td>__OOM__', '<td class="msg-oom">'
+
+# EXE-Namen/Pfade hervorheben (Marker durch span ersetzen)
+$HtmlBodyErrors = $HtmlBodyErrors -replace '__EXE__', '<span class="exe">'
+$HtmlBodyErrors = $HtmlBodyErrors -replace '__/EXE__', '</span>'
+
+# DLL-Namen hervorheben
+$HtmlBodyErrors = $HtmlBodyErrors -replace '__DLL__', '<span class="dll">'
+$HtmlBodyErrors = $HtmlBodyErrors -replace '__/DLL__', '</span>'
+
+# Ausnahmecodes hervorheben
+$HtmlBodyErrors = $HtmlBodyErrors -replace '__EXCODE__', '<span class="excode">'
+$HtmlBodyErrors = $HtmlBodyErrors -replace '__/EXCODE__', '</span>'
 
 $HtmlBodyDrives = $DriveResults | Sort-Object Server | Select-Object @{N='Server';E={ $_.Server }},
     @{N='D: Frei (GB)';E={ if ($_.FreeGB -ne $null) { $_.FreeGB } else { 'n/a' } }},
