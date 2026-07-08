@@ -8,12 +8,6 @@ Sammlung verschiedener PowerShell-Skripte für die Systemadministration.
 
 ## Enthaltene Skripte
 
-### Root
-
-| Skript | Beschreibung |
-|--------|-------------|
-| `Application_Error_Eventlog.ps1` | Exportiert Application Error/Hang/Popup Eventlog-Einträge aller Server einer OU als HTML inkl. Ampelanzeige für Speicherplatz D: und mcsdif.vhdx-Größe. |
-
 ### Citrix
 
 | Skript | Beschreibung |
@@ -32,7 +26,7 @@ Sammlung verschiedener PowerShell-Skripte für die Systemadministration.
 
 ```powershell
 # Eventlog-Report erstellen
-.\Application_Error_Eventlog.ps1 -SearchBase "OU=Servers,DC=domain,DC=local"
+.\Citrix\Application_Error_Eventlog.ps1 -SearchBase "OU=Servers,DC=domain,DC=local"
 
 # Citrix PVS Optimierung
 .\Citrix\Optimierung_Citrix_PVS.ps1
