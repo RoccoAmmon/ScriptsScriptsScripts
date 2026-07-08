@@ -255,6 +255,23 @@ $ScriptBlock = [System.Text.StringBuilder]::new()
 [void]$ScriptBlock.AppendLine('    });')
 [void]$ScriptBlock.AppendLine('  }')
 [void]$ScriptBlock.AppendLine('  if (searchBox) searchBox.addEventListener("input", applyFilters);')
+[void]$ScriptBlock.AppendLine('  // Countdown für nächste Aktualisierung')
+[void]$ScriptBlock.AppendLine('  var mr = document.querySelector("meta[http-equiv=refresh]");')
+[void]$ScriptBlock.AppendLine('  if (mr) {')
+[void]$ScriptBlock.AppendLine('    var totalSec = parseInt(mr.getAttribute("content"), 10);')
+[void]$ScriptBlock.AppendLine('    var el = document.getElementById("countdown");')
+[void]$ScriptBlock.AppendLine('    if (el) {')
+[void]$ScriptBlock.AppendLine('      var startTime = new Date().getTime();')
+[void]$ScriptBlock.AppendLine('      (function tick() {')
+[void]$ScriptBlock.AppendLine('        var elapsed = Math.floor((new Date().getTime() - startTime) / 1000);')
+[void]$ScriptBlock.AppendLine('        var rem = Math.max(0, totalSec - elapsed);')
+[void]$ScriptBlock.AppendLine('        var m = Math.floor(rem / 60);')
+[void]$ScriptBlock.AppendLine('        var s = rem % 60;')
+[void]$ScriptBlock.AppendLine('        el.textContent = m + " Min " + (s < 10 ? "0" : "") + s + " Sek";')
+[void]$ScriptBlock.AppendLine('        setTimeout(tick, 1000);')
+[void]$ScriptBlock.AppendLine('      })();')
+[void]$ScriptBlock.AppendLine('    }')
+[void]$ScriptBlock.AppendLine('  }')
 [void]$ScriptBlock.AppendLine('});')
 [void]$ScriptBlock.AppendLine('</script>')
 
@@ -324,6 +341,10 @@ if ($Interval -gt 0) {
 
 $SummaryLine = '    <div class="summary">'
 $SummaryLine += 'Erstellt: ' + (Get-Date -Format 'dd.MM.yyyy HH:mm') + ' | '
+if ($Interval -gt 0) {
+    $SummaryLine += 'Letzte Aktualisierung: <span id="lastUpdate">' + (Get-Date -Format 'HH:mm:ss') + '</span> | '
+    $SummaryLine += 'Nächste Aktualisierung in: <span id="countdown">--</span> | '
+}
 $SummaryLine += 'Zeitraum: ' + $StartTime.ToString('dd.MM.yyyy') + ' - ' + (Get-Date -Format 'dd.MM.yyyy') + ' | '
 $SummaryLine += 'Server: ' + $Computers.Count + ' | Event-Einträge: ' + $Results.Count
 $SummaryLine += '    </div>'
