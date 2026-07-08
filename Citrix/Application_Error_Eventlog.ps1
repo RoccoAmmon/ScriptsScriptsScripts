@@ -5,10 +5,12 @@
 .DESCRIPTION
     Sammelt von allen Servern in einer angegebenen OU die Eventlog-Einträge mit den Quellen
     "Application Error", "Application Hang" und "Application Popup" und exportiert sie
-    übersichtlich als HTML-Datei (Uhrzeit, Server, Fehler). Zusätzlich werden freier
-    Speicherplatz D: und Größe der mcsdif.vhdx als Ampelanzeige (rot/gelb/grün) dargestellt.
-    Fehlermeldungen enthalten farbige Hervorhebungen: EXE-Pfade (grün), DLL-Pfade (rot),
-    Ausnahmecodes (gelb) und "Nicht genügend virtueller Speicher" (rot).
+    übersichtlich als HTML-Datei (Uhrzeit, Server, Fehler). Bei Angabe von -Interval läuft
+    das Skript durchgehend und aktualisiert die HTML im angegebenen Minuten-Takt; die HTML-Seite
+    aktualisiert sich dann automatisch im Browser. Zusätzlich werden freier Speicherplatz D: und
+    Größe der mcsdif.vhdx als Ampelanzeige (rot/gelb/grün) dargestellt. Fehlermeldungen enthalten
+    farbige Hervorhebungen: EXE-Pfade (grün), DLL-Pfade (rot), Ausnahmecodes (gelb) und
+    "Nicht genügend virtueller Speicher" (rot).
 
 .PARAMETER SearchBase
     DistinguishedName der OU, in der nach Servern gesucht wird.
@@ -19,12 +21,19 @@
 .PARAMETER DaysBack
     Nur Einträge der letzten X Tage berücksichtigen. Standard: 7
 
+.PARAMETER Interval
+    Intervall in Minuten für automatische Wiederholung (0 = einmalig). Bei &gt; 0 läuft das
+    Skript durchgehend und aktualisiert die HTML-Datei im angegebenen Intervall.
+
 .EXAMPLE
     .\Application_Error_Eventlog.ps1 -SearchBase "OU=Servers,DC=domain,DC=local"
     -OutputPath "C:\Reports\errors.html" -DaysBack 14
 
+.EXAMPLE
+    .\Application_Error_Eventlog.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -Interval 30
+
 .NOTES
-    Version  : 1.1
+    Version  : 1.2
     Autor    : Rocco Ammon
 #>
 
@@ -37,14 +46,19 @@ param (
     [string]$OutputPath,
 
     [Parameter(Mandatory = $false)]
-    [int]$DaysBack = 7
+    [int]$DaysBack = 7,
+
+    [Parameter(Mandatory = $false)]
+    [int]$Interval = 0
 )
 
 # Region: Konfiguration
 $ErrorActionPreference = 'Stop'
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { '.' }
 if (-not $OutputPath) { $OutputPath = Join-Path -Path $ScriptDir -ChildPath "ApplicationErrors.html" }
-$StartTime = (Get-Date).AddDays(-$DaysBack)
+
+do {
+    $StartTime = (Get-Date).AddDays(-$DaysBack)
 
 # Pro LogName die zu suchenden Provider (Quellen)
 $LogQueries = @(
@@ -60,12 +74,12 @@ try {
 }
 catch {
     Write-Error "Fehler bei AD-Abfrage: $_"
-    exit 1
+    break
 }
 
 if (-not $Computers) {
     Write-Warning "Keine Computer in der angegebenen OU gefunden."
-    exit 0
+    break
 }
 
 Write-Verbose "Gefundene Server: $($Computers.Count)"
@@ -166,7 +180,7 @@ $HasDrives  = $DriveResults.Count -gt 0
 
 if (-not $HasErrors -and -not $HasDrives) {
     Write-Warning "Keine Daten gefunden – Report wird nicht erstellt."
-    exit 0
+    break
 }
 
 # Region: HTML-Bausteine aufbauen (keine Here-Strings)
@@ -297,6 +311,10 @@ $Html = New-Object System.Text.StringBuilder
 [void]$Html.AppendLine('<html>')
 [void]$Html.AppendLine('<head>')
 [void]$Html.AppendLine('    <meta charset="UTF-8">')
+if ($Interval -gt 0) {
+    $refreshSeconds = $Interval * 60
+    [void]$Html.AppendLine("    <meta http-equiv=""refresh"" content=""$refreshSeconds"">")
+}
 [void]$Html.AppendLine('    <title>Application Error / Hang / Popup - Report</title>')
 [void]$Html.AppendLine($HtmlHead)
 [void]$Html.AppendLine('</head>')
@@ -365,11 +383,19 @@ try {
     $Html.ToString() | Out-File -FilePath $OutputPath -Encoding utf8 -Force
     Write-Host "Report erstellt: $OutputPath" -ForegroundColor Green
 
-    if ((Get-Item $OutputPath).Length -gt 0) {
+    if ((Get-Item $OutputPath).Length -gt 0 -and $Interval -eq 0) {
         Start-Process $OutputPath
     }
 }
 catch {
     Write-Error "Fehler beim Schreiben der Datei: $_"
-    exit 1
+    break
 }
+
+# Region: Loop-Ende (bei -Interval > 0)
+if ($Interval -gt 0) {
+    $nextRun = (Get-Date).AddMinutes($Interval)
+    Write-Host "Nächste Aktualisierung: $($nextRun.ToString('dd.MM.yyyy HH:mm'))" -ForegroundColor Cyan
+    Start-Sleep -Seconds ($Interval * 60)
+}
+} while ($Interval -gt 0)
