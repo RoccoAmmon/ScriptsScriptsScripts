@@ -9,8 +9,9 @@
     "Windows Resource Exhaustion" und exportiert sie
     übersichtlich als HTML-Datei (Uhrzeit, Server, Fehler). Bei Angabe von -Interval läuft
     das Skript durchgehend und aktualisiert die HTML im angegebenen Minuten-Takt; die HTML-Seite
-    aktualisiert sich dann automatisch im Browser. Zusätzlich werden freier Speicherplatz D: und
-    Größe der mcsdif.vhdx als Ampelanzeige (rot/gelb/grün) dargestellt. Fehlermeldungen enthalten
+    aktualisiert sich dann automatisch im Browser. Zusätzlich werden freier Speicherplatz D:,
+    Größe der mcsdif.vhdx und freier Arbeitsspeicher als Ampelanzeige (rot/gelb/grün) dargestellt.
+    Fehlermeldungen enthalten
     farbige Hervorhebungen: EXE-Pfade (grün), DLL-Pfade (rot), Ausnahmecodes (gelb) und
     "Nicht genügend virtueller Speicher" (rot).
 
@@ -18,7 +19,7 @@
     DistinguishedName der OU, in der nach Servern gesucht wird.
 
 .PARAMETER OutputPath
-    Pfad zur Ausgabe-HTML-Datei. Standard: Skriptverzeichnis\ApplicationErrors.html
+    Pfad zur Ausgabe-HTML-Datei. Standard: Skriptverzeichnis\SystemStatusReport.html
 
 .PARAMETER DaysBack
     Nur Einträge der letzten X Tage berücksichtigen. Standard: 7
@@ -28,11 +29,11 @@
     Skript durchgehend und aktualisiert die HTML-Datei im angegebenen Intervall.
 
 .EXAMPLE
-    .\Application_Error_Eventlog.ps1 -SearchBase "OU=Servers,DC=domain,DC=local"
-    -OutputPath "C:\Reports\errors.html" -DaysBack 14
+    .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local"
+    -OutputPath "C:\Reports\SystemStatus.html" -DaysBack 14
 
 .EXAMPLE
-    .\Application_Error_Eventlog.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -Interval 30
+    .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -Interval 30
 
 .NOTES
     Version  : 1.3
@@ -57,7 +58,7 @@ param (
 # Region: Konfiguration
 $ErrorActionPreference = 'Stop'
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { '.' }
-if (-not $OutputPath) { $OutputPath = Join-Path -Path $ScriptDir -ChildPath "ApplicationErrors.html" }
+if (-not $OutputPath) { $OutputPath = Join-Path -Path $ScriptDir -ChildPath "SystemStatusReport.html" }
 $firstRun = $true
 
 do {
