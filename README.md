@@ -12,7 +12,7 @@ Sammlung verschiedener PowerShell-Skripte für die Systemadministration.
 
 | Skript | Beschreibung |
 |--------|-------------|
-| `Application_Error_Eventlog.ps1` | Exportiert Application Error/Hang/Popup Eventlog-Einträge aller Server einer OU als HTML inkl. Ampelanzeige für Speicherplatz D: und mcsdif.vhdx-Größe. Fehlermeldungen mit farbigen Hervorhebungen (EXE/DLL/Ausnahmecodes/OOM). Unterstützt automatische Aktualisierung per -Interval. |
+| `System-Status-Application-Fehler-Report.ps1` | Erweiterter System-Status-Report: Überwacht Application Error/Hang/Popup, **Service Control Manager** (Dienstabstürze) und **Windows Resource Exhaustion** (Speichermangel). Ampelanzeige für Speicherplatz D:, mcsdif.vhdx-Größe **und freien Arbeitsspeicher**. Farbige Hervorhebungen (EXE/DLL/Ausnahmecodes/OOM). Unterstützt automatische Aktualisierung per -Interval. |
 | `Optimierung_Citrix_PVS.ps1` | Netzwerk- und Windows-Optimierung für Citrix PVS Target Devices. Deaktiviert Offload-Features, erstellt Sicherungen und unterstützt Rollback. |
 
 ## Voraussetzungen
@@ -25,11 +25,11 @@ Sammlung verschiedener PowerShell-Skripte für die Systemadministration.
 ## Verwendung
 
 ```powershell
-# Eventlog-Report einmalig erstellen
-.\Citrix\Application_Error_Eventlog.ps1 -SearchBase "OU=Servers,DC=domain,DC=local"
+# System-Status-Report einmalig erstellen
+.\Citrix\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local"
 
-# Eventlog-Report alle 30 Min. automatisch aktualisieren
-.\Citrix\Application_Error_Eventlog.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -Interval 30
+# System-Status-Report alle 30 Min. automatisch aktualisieren
+.\Citrix\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -Interval 30
 
 # Citrix PVS Optimierung
 .\Citrix\Optimierung_Citrix_PVS.ps1

@@ -1,10 +1,12 @@
 ﻿<#
 .SYNOPSIS
-    Exportiert Application Error/Hang/Popup Eventlog-Einträge aller Server einer OU als HTML.
+    Exportiert Application Error/Hang/Popup, Service Control Manager, Windows Resource Exhaustion
+    Eventlog-Einträge aller Server einer OU als HTML.
 
 .DESCRIPTION
     Sammelt von allen Servern in einer angegebenen OU die Eventlog-Einträge mit den Quellen
-    "Application Error", "Application Hang" und "Application Popup" und exportiert sie
+    "Application Error", "Application Hang", "Application Popup", "Service Control Manager" und
+    "Windows Resource Exhaustion" und exportiert sie
     übersichtlich als HTML-Datei (Uhrzeit, Server, Fehler). Bei Angabe von -Interval läuft
     das Skript durchgehend und aktualisiert die HTML im angegebenen Minuten-Takt; die HTML-Seite
     aktualisiert sich dann automatisch im Browser. Zusätzlich werden freier Speicherplatz D: und
@@ -33,7 +35,7 @@
     .\Application_Error_Eventlog.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -Interval 30
 
 .NOTES
-    Version  : 1.2
+    Version  : 1.3
     Autor    : Rocco Ammon
 #>
 
@@ -65,6 +67,8 @@ do {
 $LogQueries = @(
     @{ LogName = 'Application'; Providers = @('Application Error', 'Application Hang') }
     @{ LogName = 'System';      Providers = @('Application Popup') }
+    @{ LogName = 'System';      Providers = @('Service Control Manager'); EventIDs = @(7031, 7032, 7034, 7000, 7009) }
+    @{ LogName = 'System';      Providers = @('Windows Resource Exhaustion'); EventIDs = @(2001, 2004, 2005, 2006, 2020) }
 )
 
 # Region: AD abfragen
@@ -102,7 +106,8 @@ foreach ($Computer in $Computers) {
         try {
             $Events = Get-WinEvent -ComputerName $Computer -FilterXPath $XPathFilter `
                 -LogName $LogName -ErrorAction Stop | Where-Object {
-                    $_.TimeCreated -ge $StartTime
+                    $_.TimeCreated -ge $StartTime -and
+                    (-not $Query.EventIDs -or ($_.Id -in $Query.EventIDs))
                 }
 
             foreach ($Event in $Events) {
@@ -127,11 +132,11 @@ foreach ($Computer in $Computers) {
     }
 }
 
-# Region: Festplatten-Status sammeln (freier Speicher D:, mcsdif.vhdx)
+# Region: Festplatten-Status & Arbeitsspeicher sammeln (D:, mcsdif.vhdx, RAM)
 $DriveResults = [System.Collections.ArrayList]::new()
 
 foreach ($Computer in $Computers) {
-    Write-Verbose "Sammle Festplatteninfos von $Computer ..."
+    Write-Verbose "Sammle Systeminfos von $Computer ..."
     $drive = $null
     $fileInfo = $null
 
@@ -155,6 +160,15 @@ foreach ($Computer in $Computers) {
         $fileInfo = [PSCustomObject]@{ Exists = $false; Size = $null }
     }
 
+    # Arbeitsspeicher abfragen
+    $mem = $null
+    try {
+        $mem = Get-CimInstance -ComputerName $Computer -ClassName Win32_OperatingSystem -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "$Computer | Arbeitsspeicher nicht ermittelbar: $_"
+    }
+
     if ($drive) {
         $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
         $totalGB = [math]::Round($drive.Size / 1GB, 2)
@@ -172,6 +186,9 @@ foreach ($Computer in $Computers) {
         FreePct        = $freePct
         VhdxExists     = $fileInfo.Exists
         VhdxSizeGB     = if ($fileInfo.Size) { [math]::Round($fileInfo.Size / 1GB, 2) } else { $null }
+        MemFreeMB      = if ($mem) { [math]::Round($mem.FreePhysicalMemory / 1024, 1) } else { $null }
+        MemTotalMB     = if ($mem) { [math]::Round($mem.TotalVisibleMemorySize / 1024, 1) } else { $null }
+        MemFreePct     = if ($mem -and $mem.TotalVisibleMemorySize -gt 0) { [math]::Round(($mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize) * 100, 1) } else { $null }
     })
 }
 
@@ -333,11 +350,11 @@ if ($Interval -gt 0) {
     $refreshSeconds = $Interval * 60 + 30  # 30 Sek. Puffer nach Skript-Neulauf
     [void]$Html.AppendLine("    <meta http-equiv=""refresh"" content=""$refreshSeconds"">")
 }
-[void]$Html.AppendLine('    <title>Application Error / Hang / Popup - Report</title>')
+    [void]$Html.AppendLine('    <title>System-Status &amp; Application-Fehler Report</title>')
 [void]$Html.AppendLine($HtmlHead)
 [void]$Html.AppendLine('</head>')
 [void]$Html.AppendLine('<body>')
-[void]$Html.AppendLine('    <h1>Application-Fehler Report</h1>')
+[void]$Html.AppendLine('    <h1>System-Status &amp; Application-Fehler Report</h1>')
 
 $SummaryLine = '    <div class="summary">'
 $SummaryLine += 'Erstellt: ' + (Get-Date -Format 'dd.MM.yyyy HH:mm') + ' | '
@@ -354,7 +371,7 @@ $SummaryLine += '    </div>'
 if ($HasDrives) {
     [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
     [void]$Html.AppendLine('    <table id="ampelTable">')
-    [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th></tr>')
+    [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th></tr>')
 
     foreach ($drv in ($DriveResults | Sort-Object Server)) {
         $serverName = $drv.Server
@@ -380,7 +397,17 @@ if ($HasDrives) {
             $statusDatei = 'Datei fehlt'
         }
 
-        [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td></tr>")
+        # Ampel für Arbeitsspeicher
+        if ($drv.MemFreePct -ne $null) {
+            if ($drv.MemFreePct -lt 10)       { $ampelMem = 'ampel-red';    $statusMem = "$($drv.MemFreePct)% frei" }
+            elseif ($drv.MemFreePct -lt 20)   { $ampelMem = 'ampel-yellow'; $statusMem = "$($drv.MemFreePct)% frei" }
+            else                              { $ampelMem = 'ampel-green';  $statusMem = "$($drv.MemFreePct)% frei" }
+        } else {
+            $ampelMem = 'ampel-gray'
+            $statusMem = 'n/a'
+        }
+
+        [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td></tr>")
     }
 
     [void]$Html.AppendLine('    </table>')
