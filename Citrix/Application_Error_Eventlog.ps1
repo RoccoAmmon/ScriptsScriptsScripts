@@ -313,7 +313,7 @@ $Html = New-Object System.Text.StringBuilder
 [void]$Html.AppendLine('<head>')
 [void]$Html.AppendLine('    <meta charset="UTF-8">')
 if ($Interval -gt 0) {
-    $refreshSeconds = $Interval * 60
+    $refreshSeconds = $Interval * 60 + 30  # 30 Sek. Puffer nach Skript-Neulauf
     [void]$Html.AppendLine("    <meta http-equiv=""refresh"" content=""$refreshSeconds"">")
 }
 [void]$Html.AppendLine('    <title>Application Error / Hang / Popup - Report</title>')
