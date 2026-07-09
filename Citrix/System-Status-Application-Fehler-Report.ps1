@@ -265,8 +265,10 @@ try {
                 $latestFile = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' -ErrorAction SilentlyContinue |
                     Sort-Object LastWriteTime -Descending | Select-Object -First 1
                 if ($latestFile) {
-                    $lastLine = Get-Content -Path $latestFile.FullName -Tail 1 -ErrorAction SilentlyContinue
-                    if ($lastLine -match "updateid\s+'(.+?)'") {
+                    $updateLine = Get-Content -Path $latestFile.FullName -ErrorAction SilentlyContinue |
+                        Where-Object { $_ -match "updateid\s+'(.+?)'" } |
+                        Select-Object -Last 1
+                    if ($updateLine -match "updateid\s+'(.+?)'") {
                         $medicoUpdateId = $matches[1]
                     }
                 }
