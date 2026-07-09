@@ -147,6 +147,7 @@ try {
                 CpuPct           = $null
                 PageFileMB       = $null; PageFileTotalMB = $null; PageFileUsagePct = $null
                 FslogixServices  = @()
+                MedicoUpdateId   = $null
             }
         }
 
@@ -257,6 +258,24 @@ try {
                     StartType -ErrorAction Stop
         } catch {}
 
+        $medicoUpdateId = $null
+        try {
+            $driveY = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='Y:'" -ErrorAction SilentlyContinue
+            if ($driveY) {
+                $logDir = 'Y:\updateservice.log'
+                if (Test-Path $logDir -PathType Container) {
+                    $latestFile = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' |
+                        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                    if ($latestFile) {
+                        $lastLine = Get-Content -Path $latestFile.FullName -Tail 1
+                        if ($lastLine -match "set last successful updateid to '(.+?)'") {
+                            $medicoUpdateId = $matches[1]
+                        }
+                    }
+                }
+            }
+        } catch {}
+
         if ($drive) {
             $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
             $totalGB = [math]::Round($drive.Size / 1GB, 2)
@@ -283,6 +302,7 @@ try {
             PageFileTotalMB  = $pfAllocatedMB
             PageFileUsagePct = $pfUsagePct
             FslogixServices  = $fslogixServices
+            MedicoUpdateId   = $medicoUpdateId
         }
     }
 
@@ -331,6 +351,7 @@ try {
             PageFileTotalMB  = $result.PageFileTotalMB
             PageFileUsagePct = $result.PageFileUsagePct
             FslogixServices  = $result.FslogixServices
+            MedicoUpdateId   = $result.MedicoUpdateId
         })
 
         if ($result.TopProcs -and $result.TopProcs.Count -gt 0) {
@@ -637,7 +658,7 @@ try {
     if ($HasDrives) {
         [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
         [void]$Html.AppendLine('    <table id="ampelTable">')
-        [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th></tr>')
+        [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th><th>Medico</th></tr>')
 
         foreach ($drv in ($DriveResults | Sort-Object Server)) {
             $serverName = $drv.Server
@@ -692,7 +713,9 @@ try {
             }
             if (-not $fslHtml) { $fslHtml = '<span class="ampel ampel-gray" style="font-size:11px">keine</span>' }
 
-            [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td></tr>")
+            $medicoDisplay = if ($drv.MedicoUpdateId) { "<span style=""font-weight:600;font-size:12px"">$($drv.MedicoUpdateId)</span>" } else { '-' }
+
+            [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td><td style=""text-align:center"">$medicoDisplay</td></tr>")
         }
         [void]$Html.AppendLine('    </table>')
     }
