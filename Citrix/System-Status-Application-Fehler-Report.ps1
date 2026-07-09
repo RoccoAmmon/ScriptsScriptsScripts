@@ -260,17 +260,14 @@ try {
 
         $medicoUpdateId = $null
         try {
-            $driveY = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='Y:'" -ErrorAction SilentlyContinue
-            if ($driveY) {
-                $logDir = 'Y:\updateservice.log'
-                if (Test-Path $logDir -PathType Container) {
-                    $latestFile = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' |
-                        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                    if ($latestFile) {
-                        $lastLine = Get-Content -Path $latestFile.FullName -Tail 1
-                        if ($lastLine -match "set last successful updateid to '(.+?)'") {
-                            $medicoUpdateId = $matches[1]
-                        }
+            $logDir = 'Y:\updateservice.log'
+            if (Test-Path -Path $logDir -PathType Container -ErrorAction SilentlyContinue) {
+                $latestFile = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                if ($latestFile) {
+                    $lastLine = Get-Content -Path $latestFile.FullName -Tail 1 -ErrorAction SilentlyContinue
+                    if ($lastLine -match "updateid\s+'(.+?)'") {
+                        $medicoUpdateId = $matches[1]
                     }
                 }
             }
