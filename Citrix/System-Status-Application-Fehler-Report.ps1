@@ -13,8 +13,9 @@
     Größe der mcsdif.vhdx und freier Arbeitsspeicher als Ampelanzeige (rot/gelb/grün) dargestellt.
     Fehlermeldungen enthalten
     farbige Hervorhebungen: EXE-Pfade (grün), DLL-Pfade (rot), Ausnahmecodes (gelb) und
-    "Nicht genügend virtueller Speicher" (rot). Zeigt aktive Citrix Sessions pro Server
-    und eine TOP 10 der größten Speicherfresser (WorkingSet) sowie eine TOP 10
+    "Nicht genügend virtueller Speicher" (rot). Zeigt aktive Citrix Sessions pro Server,
+    CPU-Auslastung, Auslagerungsdatei-Belegung und FSLogix-Dienststatus (farbig).
+    TOP 10 der größten Speicherfresser (WorkingSet) sowie eine TOP 10
     des Session-RAM (nach Benutzer gruppiert) aller Server an.
     Klick auf die Prozess-Anzahl öffnet die Prozessliste in einem In-Page-Modal (kein Popup!).
 
@@ -34,10 +35,10 @@
     .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -DaysBack 14
 
 .NOTES
-    Version  : 1.9
+    Version  : 1.10
     Autor    : Rocco Ammon
-    Änderung : Session-Detail per In-Page-Modal statt window.open (Popup-Blocker-sicher),
-               fehlendes Modal-CSS ergänzt, Logging nach C:\ScriptLog.
+    Änderung : CPU-Auslastung, Auslagerungsdatei (Pagefile), FSLogix-Dienststatus
+               in die Ampel-Tabelle aufgenommen.
 #>
 
 [CmdletBinding()]
@@ -134,15 +135,18 @@ try {
         $reachable = Test-Connection -ComputerName $env:COMPUTERNAME -Count 1 -Quiet -ErrorAction SilentlyContinue
         if (-not $reachable) {
             return [PSCustomObject]@{
-                Computer   = $env:COMPUTERNAME
-                Reachable  = $false
-                Events     = $events
-                FreeGB     = $null; TotalGB = $null; FreePct = $null
-                VhdxExists = $false; VhdxSizeGB = $null
-                MemFreeMB  = $null; MemTotalMB = $null; MemFreePct = $null
-                Sessions   = 0
-                TopProcs   = @()
-                SessionRAM = @()
+                Computer         = $env:COMPUTERNAME
+                Reachable        = $false
+                Events           = $events
+                FreeGB           = $null; TotalGB = $null; FreePct = $null
+                VhdxExists       = $false; VhdxSizeGB = $null
+                MemFreeMB        = $null; MemTotalMB = $null; MemFreePct = $null
+                Sessions         = 0
+                TopProcs         = @()
+                SessionRAM       = @()
+                CpuPct           = $null
+                PageFileMB       = $null; PageFileTotalMB = $null; PageFileUsagePct = $null
+                FslogixServices  = @()
             }
         }
 
@@ -228,6 +232,29 @@ try {
                 } | Sort-Object SessionRAM_MB -Descending | Select-Object -First 10
         } catch {}
 
+        $cpuPct = $null
+        try {
+            $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop
+            if ($cpu) { $cpuPct = [math]::Round(($cpu | Measure-Object -Property LoadPercentage -Average).Average, 1) }
+        } catch {}
+
+        $pfAllocatedMB = $null; $pfCurrentMB = $null; $pfUsagePct = $null
+        try {
+            $pageFile = Get-CimInstance Win32_PageFileUsage -ErrorAction Stop
+            if ($pageFile) {
+                $pfAllocatedMB = ($pageFile | Measure-Object -Property AllocatedBaseSize -Sum).Sum
+                $pfCurrentMB   = ($pageFile | Measure-Object -Property CurrentUsage -Sum).Sum
+                $pfUsagePct    = if ($pfAllocatedMB -gt 0) { [math]::Round(($pfCurrentMB / $pfAllocatedMB) * 100, 1) } else { $null }
+            }
+        } catch {}
+
+        $fslogixServices = @()
+        try {
+            $fslogixServices = Get-Service |
+                Where-Object { $_.DisplayName -like '*FSLogix*' -or $_.Name -like '*fsl*' -or $_.Name -like '*frx*' } |
+                Select-Object Name, DisplayName, Status, StartType -ErrorAction Stop
+        } catch {}
+
         if ($drive) {
             $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
             $totalGB = [math]::Round($drive.Size / 1GB, 2)
@@ -235,20 +262,25 @@ try {
         } else { $freeGB = $null; $totalGB = $null; $freePct = $null }
 
         [PSCustomObject]@{
-            Computer   = $env:COMPUTERNAME
-            Reachable  = $true
-            Events     = $events
-            FreeGB     = $freeGB
-            TotalGB    = $totalGB
-            FreePct    = $freePct
-            VhdxExists = $vhdxExists
-            VhdxSizeGB = $vhdxSizeGB
-            MemFreeMB  = if ($mem) { [math]::Round($mem.FreePhysicalMemory / 1024, 1) } else { $null }
-            MemTotalMB = if ($mem) { [math]::Round($mem.TotalVisibleMemorySize / 1024, 1) } else { $null }
-            MemFreePct = if ($mem -and $mem.TotalVisibleMemorySize -gt 0) { [math]::Round(($mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize) * 100, 1) } else { $null }
-            Sessions   = $sessionCount
-            TopProcs   = $top
-            SessionRAM = $sessionRAM
+            Computer         = $env:COMPUTERNAME
+            Reachable        = $true
+            Events           = $events
+            FreeGB           = $freeGB
+            TotalGB          = $totalGB
+            FreePct          = $freePct
+            VhdxExists       = $vhdxExists
+            VhdxSizeGB       = $vhdxSizeGB
+            MemFreeMB        = if ($mem) { [math]::Round($mem.FreePhysicalMemory / 1024, 1) } else { $null }
+            MemTotalMB       = if ($mem) { [math]::Round($mem.TotalVisibleMemorySize / 1024, 1) } else { $null }
+            MemFreePct       = if ($mem -and $mem.TotalVisibleMemorySize -gt 0) { [math]::Round(($mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize) * 100, 1) } else { $null }
+            Sessions         = $sessionCount
+            TopProcs         = $top
+            SessionRAM       = $sessionRAM
+            CpuPct           = $cpuPct
+            PageFileMB       = $pfCurrentMB
+            PageFileTotalMB  = $pfAllocatedMB
+            PageFileUsagePct = $pfUsagePct
+            FslogixServices  = $fslogixServices
         }
     }
 
@@ -282,16 +314,21 @@ try {
         }
 
         [void]$DriveResults.Add([PSCustomObject]@{
-            Server     = $result.Computer
-            FreeGB     = $result.FreeGB
-            TotalGB    = $result.TotalGB
-            FreePct    = $result.FreePct
-            VhdxExists = $result.VhdxExists
-            VhdxSizeGB = $result.VhdxSizeGB
-            MemFreeMB  = $result.MemFreeMB
-            MemTotalMB = $result.MemTotalMB
-            MemFreePct = $result.MemFreePct
-            Sessions   = $result.Sessions
+            Server           = $result.Computer
+            FreeGB           = $result.FreeGB
+            TotalGB          = $result.TotalGB
+            FreePct          = $result.FreePct
+            VhdxExists       = $result.VhdxExists
+            VhdxSizeGB       = $result.VhdxSizeGB
+            MemFreeMB        = $result.MemFreeMB
+            MemTotalMB       = $result.MemTotalMB
+            MemFreePct       = $result.MemFreePct
+            Sessions         = $result.Sessions
+            CpuPct           = $result.CpuPct
+            PageFileMB       = $result.PageFileMB
+            PageFileTotalMB  = $result.PageFileTotalMB
+            PageFileUsagePct = $result.PageFileUsagePct
+            FslogixServices  = $result.FslogixServices
         })
 
         if ($result.TopProcs -and $result.TopProcs.Count -gt 0) {
@@ -598,7 +635,7 @@ try {
     if ($HasDrives) {
         [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
         [void]$Html.AppendLine('    <table id="ampelTable">')
-        [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>Sessions</th></tr>')
+        [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>FSLogix-Dienste</th></tr>')
 
         foreach ($drv in ($DriveResults | Sort-Object Server)) {
             $serverName = $drv.Server
@@ -622,9 +659,33 @@ try {
                 else                            { $ampelMem = 'ampel-green';  $statusMem = "$($drv.MemFreePct)% frei" }
             } else { $ampelMem = 'ampel-gray'; $statusMem = 'n/a' }
 
+            # CPU-Ampel
+            if ($drv.CpuPct -ne $null) {
+                if ($drv.CpuPct -ge 90)      { $ampelCpu = 'ampel-red';    $statusCpu = "$($drv.CpuPct)%" }
+                elseif ($drv.CpuPct -ge 75)  { $ampelCpu = 'ampel-yellow'; $statusCpu = "$($drv.CpuPct)%" }
+                else                         { $ampelCpu = 'ampel-green';  $statusCpu = "$($drv.CpuPct)%" }
+            } else { $ampelCpu = 'ampel-gray'; $statusCpu = 'n/a' }
+
+            # Pagefile-Ampel
+            if ($drv.PageFileUsagePct -ne $null) {
+                if ($drv.PageFileUsagePct -ge 90)      { $ampelPf = 'ampel-red';    $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
+                elseif ($drv.PageFileUsagePct -ge 75)  { $ampelPf = 'ampel-yellow'; $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
+                else                                   { $ampelPf = 'ampel-green';  $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
+            } else { $ampelPf = 'ampel-gray'; $statusPf = 'n/a' }
+
             $sessionDisplay = if ($drv.Sessions -and $drv.Sessions -gt 0) { $drv.Sessions } else { '-' }
 
-            [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td>$sessionDisplay</td></tr>")
+            # FSLogix-Status farbig darstellen
+            $fslDisplay = @()
+            if ($drv.FslogixServices -and $drv.FslogixServices.Count -gt 0) {
+                foreach ($svc in $drv.FslogixServices) {
+                    $color = if ($svc.Status -eq 'Running') { '#27ae60' } else { '#e74c3c' }
+                    $fslDisplay += "<span style=""color:$color;font-weight:600"">$($svc.Name)=$($svc.Status)</span>"
+                }
+            }
+            $fslHtml = if ($fslDisplay) { $fslDisplay -join '<br>' } else { '<span class="ampel ampel-gray" style="font-size:11px">keine</span>' }
+
+            [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td></tr>")
         }
         [void]$Html.AppendLine('    </table>')
     }
