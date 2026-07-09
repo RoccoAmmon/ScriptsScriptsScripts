@@ -178,115 +178,74 @@ if ($Results.Count -gt $lastCount) {
 }
 @{ LastEventCount = $Results.Count; Timestamp = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') } | ConvertTo-Json | Set-Content $CacheFile -Encoding UTF8
 
-Write-Host "Eventlogs ausgewertet, sammle Systeminfos (Speicher, Dateien, RAM) ..." -ForegroundColor Cyan
+Write-Host "Sammle Systeminfos + Top-Prozesse ..." -ForegroundColor Cyan
 
-# Region: Festplatten-Status & Arbeitsspeicher sammeln (D:, mcsdif.vhdx, RAM)
+# Region: Systeminfos & Top-Prozesse in EINER Schleife sammeln
 $DriveResults = [System.Collections.ArrayList]::new()
-
+$TopProcesses = [System.Collections.ArrayList]::new()
 $currentServer = 0
+
 foreach ($Computer in $Computers) {
     $currentServer++
     Write-Host "[$currentServer/$serverCount] $Computer ..." -ForegroundColor Yellow
-    Write-Verbose "Sammle Systeminfos von $Computer ..."
-    $drive = $null
-    $fileInfo = $null
 
-    try {
-        $drive = Get-CimInstance -ComputerName $Computer -ClassName Win32_LogicalDisk `
-            -Filter "DeviceID='D:'" -ErrorAction Stop
-    }
-    catch {
-        Write-Warning "$Computer | Festplatte D: nicht ermittelbar: $_"
-    }
+    # CIM-Queries (nativ, schnell)
+    $drive = $null; $mem = $null
+    try { $drive = Get-CimInstance -ComputerName $Computer -ClassName Win32_LogicalDisk -Filter "DeviceID='D:'" -ErrorAction Stop } catch {}
+    try { $mem = Get-CimInstance -ComputerName $Computer -ClassName Win32_OperatingSystem -ErrorAction Stop } catch {}
 
+    # Alles in EINEM Invoke-Command: vhdx + Sessions + Top-Prozesse
+    $remoteData = $null
     try {
-        $fileInfo = Invoke-Command -ComputerName $Computer -ScriptBlock {
+        $remoteData = Invoke-Command -ComputerName $Computer -ScriptBlock {
+            # mcsdif.vhdx
             $f = Get-Item 'D:\mcsdif.vhdx' -ErrorAction SilentlyContinue
-            if ($f) { [PSCustomObject]@{ Exists = $true; Size = $f.Length } }
-            else { [PSCustomObject]@{ Exists = $false; Size = $null } }
-        } -ErrorAction Stop
-    }
-    catch {
-        Write-Warning "$Computer | Datei mcsdif.vhdx nicht ermittelbar: $_"
-        $fileInfo = [PSCustomObject]@{ Exists = $false; Size = $null }
-    }
+            $vhdx = if ($f) { [PSCustomObject]@{ Exists = $true; Size = $f.Length } } else { [PSCustomObject]@{ Exists = $false; Size = $null } }
 
-    # Arbeitsspeicher abfragen
-    $mem = $null
-    try {
-        $mem = Get-CimInstance -ComputerName $Computer -ClassName Win32_OperatingSystem -ErrorAction Stop
-    }
-    catch {
-        Write-Warning "$Computer | Arbeitsspeicher nicht ermittelbar: $_"
-    }
+            # Sessions zählen (explorer.exe, fallback query session)
+            $s = @(Get-Process -Name 'explorer.exe' -ErrorAction SilentlyContinue).Count
+            if ($s -eq 0) { $s = @(query session 2>$null | Where-Object { $_ -match 'Active' }).Count }
 
-    # Sessions zählen (mehrere Methoden)
-    $sessionCount = 0
-    # 1. explorer.exe pro Benutzersitzung (zuverlässig auf Terminalservern)
-    try {
-        $procs = Get-CimInstance -ComputerName $Computer -ClassName Win32_Process `
-            -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue
-        if ($procs) { $sessionCount = @($procs).Count }
+            # Top 5 Prozesse nach WorkingSet
+            $top = Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 5 Name, Id, @{N='WS_MB';E={[math]::Round($_.WorkingSet64 / 1MB, 1)}}
+
+            [PSCustomObject]@{ Vhdx = $vhdx; Sessions = $s; TopProcs = $top }
+        } -ErrorAction SilentlyContinue
     } catch {}
-    # 2. Fallback: query session zählt nur aktive Sessions
-    if ($sessionCount -eq 0) {
-        try {
-            $qsRaw = Invoke-Command -ComputerName $Computer -ScriptBlock {
-                @(query session 2>$null | Select-String 'Active').Count
-            } -ErrorAction SilentlyContinue
-            if ($qsRaw) { $sessionCount = $qsRaw }
-        } catch {}
+
+    if (-not $remoteData) {
+        $remoteData = [PSCustomObject]@{
+            Vhdx     = [PSCustomObject]@{ Exists = $false; Size = $null }
+            Sessions = 0
+            TopProcs = @()
+        }
     }
 
+    # DriveResults berechnen
     if ($drive) {
         $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
         $totalGB = [math]::Round($drive.Size / 1GB, 2)
         $freePct = if ($drive.Size -gt 0) { [math]::Round(($drive.FreeSpace / $drive.Size) * 100, 1) } else { 0 }
-    } else {
-        $freeGB  = $null
-        $totalGB = $null
-        $freePct = $null
-    }
+    } else { $freeGB = $null; $totalGB = $null; $freePct = $null }
 
     [void]$DriveResults.Add([PSCustomObject]@{
-        Server         = $Computer
-        FreeGB         = $freeGB
-        TotalGB        = $totalGB
-        FreePct        = $freePct
-        VhdxExists     = $fileInfo.Exists
-        VhdxSizeGB     = if ($fileInfo.Size) { [math]::Round($fileInfo.Size / 1GB, 2) } else { $null }
-        MemFreeMB      = if ($mem) { [math]::Round($mem.FreePhysicalMemory / 1024, 1) } else { $null }
-        MemTotalMB     = if ($mem) { [math]::Round($mem.TotalVisibleMemorySize / 1024, 1) } else { $null }
-        MemFreePct     = if ($mem -and $mem.TotalVisibleMemorySize -gt 0) { [math]::Round(($mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize) * 100, 1) } else { $null }
-        Sessions       = $sessionCount
+        Server     = $Computer
+        FreeGB     = $freeGB
+        TotalGB    = $totalGB
+        FreePct    = $freePct
+        VhdxExists = $remoteData.Vhdx.Exists
+        VhdxSizeGB = if ($remoteData.Vhdx.Size) { [math]::Round($remoteData.Vhdx.Size / 1GB, 2) } else { $null }
+        MemFreeMB  = if ($mem) { [math]::Round($mem.FreePhysicalMemory / 1024, 1) } else { $null }
+        MemTotalMB = if ($mem) { [math]::Round($mem.TotalVisibleMemorySize / 1024, 1) } else { $null }
+        MemFreePct = if ($mem -and $mem.TotalVisibleMemorySize -gt 0) { [math]::Round(($mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize) * 100, 1) } else { $null }
+        Sessions   = $remoteData.Sessions
     })
-}
 
-Write-Host "Sammle Top-Prozesse (Speicherfresser) ..." -ForegroundColor Cyan
-
-# Region: TOP 10 Speicherfresser sammeln
-$TopProcesses = [System.Collections.ArrayList]::new()
-$currentServer = 0
-foreach ($Computer in $Computers) {
-    $currentServer++
-    Write-Host "[$currentServer/$serverCount] $Computer - Top-Prozesse ..." -ForegroundColor Yellow
-    try {
-        $procs = Invoke-Command -ComputerName $Computer -ScriptBlock {
-            Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 5 Name, Id, @{N='WS_MB';E={[math]::Round($_.WorkingSet64 / 1MB, 1)}}
-        } -ErrorAction SilentlyContinue
-        if ($procs) {
-            foreach ($p in $procs) {
-                [void]$TopProcesses.Add([PSCustomObject]@{
-                    Server = $Computer
-                    Name   = $p.Name
-                    PID    = $p.Id
-                    WS_MB  = $p.WS_MB
-                })
-            }
+    # Top-Prozesse sammeln
+    if ($remoteData.TopProcs) {
+        foreach ($p in $remoteData.TopProcs) {
+            [void]$TopProcesses.Add([PSCustomObject]@{ Server = $Computer; Name = $p.Name; PID = $p.Id; WS_MB = $p.WS_MB })
         }
-    }
-    catch {
-        Write-Warning "$Computer | Top-Prozesse nicht ermittelbar: $_"
     }
 }
 $Top10 = $TopProcesses | Sort-Object WS_MB -Descending | Select-Object -First 10
