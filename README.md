@@ -56,16 +56,16 @@
 
 ## 📖 Wiki
 
-Ausführliche Dokumentation zu allen Skripten findest du im **[📚 Wiki](.wiki/Home.md)**:
+Ausführliche Dokumentation zu allen Skripten findest du im **[📚 Wiki](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki)**:
 
 | Seite | Inhalt |
 |-------|--------|
-| [🏠 Home](.wiki/Home.md) | Übersicht und Navigation |
-| [📊 System-Status Report](.wiki/System-Status-Report.md) | Vollständige Dokumentation des Monitoring-Reports |
-| [🖥️ Citrix PVS Optimierung](.wiki/Citrix-PVS-Optimierung.md) | Details zur PVS Target Device Optimierung |
-| [⚙️ Voraussetzungen](.wiki/Voraussetzungen.md) | Systemanforderungen, Module, Encoding |
-| [🐛 Fehlerbehebung](.wiki/Fehlerbehebung.md) | Bekannte Probleme und Lösungen |
-| [📜 Changelog](.wiki/Changelog.md) | Versionshistorie |
+| [🏠 Home](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/Home) | Übersicht und Navigation |
+| [📊 System-Status Report](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/System-Status-Report) | Vollständige Dokumentation des Monitoring-Reports |
+| [🖥️ Citrix PVS Optimierung](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/Citrix-PVS-Optimierung) | Details zur PVS Target Device Optimierung |
+| [⚙️ Voraussetzungen](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/Voraussetzungen) | Systemanforderungen, Module, Encoding |
+| [🐛 Fehlerbehebung](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/Fehlerbehebung) | Bekannte Probleme und Lösungen |
+| [📜 Changelog](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/Changelog) | Versionshistorie |
 
 ---
 
