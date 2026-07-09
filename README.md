@@ -12,7 +12,7 @@ Sammlung verschiedener PowerShell-Skripte für die Systemadministration.
 
 | Skript | Beschreibung |
 |--------|-------------|
-| `System-Status-Application-Fehler-Report.ps1` | Erweiterter System-Status-Report: Überwacht Application Error/Hang/Popup, **Service Control Manager** (Dienstabstürze) und **Windows Resource Exhaustion** (Speichermangel). Ampelanzeige für Speicherplatz D:, mcsdif.vhdx-Größe **und freien Arbeitsspeicher**. Farbige Hervorhebungen (EXE/DLL/Ausnahmecodes/OOM). Unterstützt automatische Aktualisierung per -Interval. |
+| `System-Status-Application-Fehler-Report.ps1` | Erweiterter System-Status-Report: Überwacht Application Error/Hang/Popup, **Service Control Manager** (Dienstabstürze) und **Windows Resource Exhaustion** (Speichermangel). Ampelanzeige für Speicherplatz D:, mcsdif.vhdx-Größe **und freien Arbeitsspeicher**. Farbige Hervorhebungen (EXE/DLL/Ausnahmecodes/OOM). Unterstützt automatische Aktualisierung per -Interval. Piepton bei neuen Eventlog-Einträgen (Konsole + Browser). |
 | `Optimierung_Citrix_PVS.ps1` | Netzwerk- und Windows-Optimierung für Citrix PVS Target Devices. Deaktiviert Offload-Features, erstellt Sicherungen und unterstützt Rollback. |
 
 ## Voraussetzungen
