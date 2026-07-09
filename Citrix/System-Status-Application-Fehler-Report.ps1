@@ -13,7 +13,8 @@
     Größe der mcsdif.vhdx und freier Arbeitsspeicher als Ampelanzeige (rot/gelb/grün) dargestellt.
     Fehlermeldungen enthalten
     farbige Hervorhebungen: EXE-Pfade (grün), DLL-Pfade (rot), Ausnahmecodes (gelb) und
-    "Nicht genügend virtueller Speicher" (rot).
+    "Nicht genügend virtueller Speicher" (rot). Zeigt aktive Citrix Sessions pro Server
+    und eine TOP 10 der größten Speicherfresser (WorkingSet) aller Server an.
 
 .PARAMETER SearchBase
     DistinguishedName der OU, in der nach Servern gesucht wird.
@@ -36,7 +37,7 @@
     .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -Interval 30
 
 .NOTES
-    Version  : 1.4
+    Version  : 1.5
     Autor    : Rocco Ammon
 #>
 
@@ -219,6 +220,12 @@ foreach ($Computer in $Computers) {
         Write-Warning "$Computer | Arbeitsspeicher nicht ermittelbar: $_"
     }
 
+    # Citrix Sessions abfragen
+    $sessionCount = 0
+    try {
+        $sessionCount = @(Get-CimInstance -ComputerName $Computer -ClassName Win32_TerminalServicesSession -ErrorAction SilentlyContinue).Count
+    } catch {}
+
     if ($drive) {
         $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
         $totalGB = [math]::Round($drive.Size / 1GB, 2)
@@ -239,8 +246,38 @@ foreach ($Computer in $Computers) {
         MemFreeMB      = if ($mem) { [math]::Round($mem.FreePhysicalMemory / 1024, 1) } else { $null }
         MemTotalMB     = if ($mem) { [math]::Round($mem.TotalVisibleMemorySize / 1024, 1) } else { $null }
         MemFreePct     = if ($mem -and $mem.TotalVisibleMemorySize -gt 0) { [math]::Round(($mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize) * 100, 1) } else { $null }
+        Sessions       = $sessionCount
     })
 }
+
+Write-Host "Sammle Top-Prozesse (Speicherfresser) ..." -ForegroundColor Cyan
+
+# Region: TOP 10 Speicherfresser sammeln
+$TopProcesses = [System.Collections.ArrayList]::new()
+$currentServer = 0
+foreach ($Computer in $Computers) {
+    $currentServer++
+    Write-Host "[$currentServer/$serverCount] $Computer - Top-Prozesse ..." -ForegroundColor Yellow
+    try {
+        $procs = Invoke-Command -ComputerName $Computer -ScriptBlock {
+            Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 5 Name, Id, @{N='WS_MB';E={[math]::Round($_.WorkingSet64 / 1MB, 1)}}
+        } -ErrorAction SilentlyContinue
+        if ($procs) {
+            foreach ($p in $procs) {
+                [void]$TopProcesses.Add([PSCustomObject]@{
+                    Server = $Computer
+                    Name   = $p.Name
+                    PID    = $p.Id
+                    WS_MB  = $p.WS_MB
+                })
+            }
+        }
+    }
+    catch {
+        Write-Warning "$Computer | Top-Prozesse nicht ermittelbar: $_"
+    }
+}
+$Top10 = $TopProcesses | Sort-Object WS_MB -Descending | Select-Object -First 10
 
 Write-Host "Erstelle HTML-Report ..." -ForegroundColor Cyan
 
@@ -289,6 +326,10 @@ $StyleBlock = [System.Text.StringBuilder]::new()
 [void]$StyleBlock.AppendLine('    span.exe { background-color: #d4edda; color: #000; font-weight: 700; padding: 1px 4px; border-radius: 3px; }')
 [void]$StyleBlock.AppendLine('    span.dll { background-color: #f8d7da; color: #000; font-weight: 700; padding: 1px 4px; border-radius: 3px; }')
 [void]$StyleBlock.AppendLine('    span.excode { background-color: #fff3cd; color: #000; font-weight: 700; padding: 1px 4px; border-radius: 3px; }')
+[void]$StyleBlock.AppendLine('    #topTable td:first-child { font-weight: 700; color: #007acc; }')
+[void]$StyleBlock.AppendLine('    #topTable td:nth-child(5) { font-weight: 700; text-align: right; }')
+[void]$StyleBlock.AppendLine('    .sessions { text-align: center; font-weight: 600; }')
+[void]$StyleBlock.AppendLine('    td.sessions-highlight { background-color: #e8f4fd; font-weight: 600; }')
 [void]$StyleBlock.AppendLine('</style>')
 
 $ScriptBlock = [System.Text.StringBuilder]::new()
@@ -467,7 +508,7 @@ $SummaryLine += '    </div>'
 if ($HasDrives) {
     [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
     [void]$Html.AppendLine('    <table id="ampelTable">')
-    [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th></tr>')
+    [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>Sessions</th></tr>')
 
     foreach ($drv in ($DriveResults | Sort-Object Server)) {
         $serverName = $drv.Server
@@ -503,9 +544,25 @@ if ($HasDrives) {
             $statusMem = 'n/a'
         }
 
-        [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td></tr>")
+        # Sessions als Zahl (grau bei 0)
+        $sessionDisplay = if ($drv.Sessions -and $drv.Sessions -gt 0) { $drv.Sessions } else { '-' }
+
+        [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td>$sessionDisplay</td></tr>")
     }
 
+    [void]$Html.AppendLine('    </table>')
+}
+
+# TOP 10 Speicherfresser
+if ($Top10 -and $Top10.Count -gt 0) {
+    [void]$Html.AppendLine('    <h2>TOP 10 Speicherfresser (WorkingSet)</h2>')
+    [void]$Html.AppendLine('    <table id="topTable">')
+    [void]$Html.AppendLine('        <tr><th>#</th><th>Server</th><th>Prozess</th><th>PID</th><th>Arbeitsspeicher (MB)</th></tr>')
+    $rank = 0
+    foreach ($p in $Top10) {
+        $rank++
+        [void]$Html.AppendLine("        <tr><td>$rank</td><td>$($p.Server)</td><td>$($p.Name)</td><td>$($p.PID)</td><td>$($p.WS_MB) MB</td></tr>")
+    }
     [void]$Html.AppendLine('    </table>')
 }
 
