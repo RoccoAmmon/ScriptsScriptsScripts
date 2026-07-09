@@ -251,7 +251,7 @@ try {
         $fslogixServices = @()
         try {
             $fslogixServices = Get-Service |
-                Where-Object { $_.DisplayName -like '*FSLogix*' -or $_.Name -like '*fsl*' -or $_.Name -like '*frx*' -or $_.Name -eq 'cyserver' } |
+                Where-Object { $_.DisplayName -like '*FSLogix*' -or $_.Name -like '*fsl*' -or $_.Name -like '*frx*' -or $_.Name -eq 'cyserver' -or $_.Name -eq 'WemAgentSvc' -or $_.Name -eq 'BrokerAgent' } |
                 Select-Object Name, DisplayName,
                     @{N='Status';E={$_.Status.ToString()}},
                     StartType -ErrorAction Stop
@@ -637,7 +637,7 @@ try {
     if ($HasDrives) {
         [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
         [void]$Html.AppendLine('    <table id="ampelTable">')
-        [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>FSLogix-Dienste</th></tr>')
+        [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th></tr>')
 
         foreach ($drv in ($DriveResults | Sort-Object Server)) {
             $serverName = $drv.Server
@@ -681,7 +681,7 @@ try {
             $fslHtml = ''
             if ($drv.FslogixServices -and $drv.FslogixServices.Count -gt 0) {
                 $svcBoxes = @()
-                $nameMap = @{ 'cyserver' = 'Cortex'; 'frxccds' = 'FSL VHD'; 'frxsvc' = 'FSL App' }
+                $nameMap = @{ 'cyserver' = 'Cortex'; 'frxccds' = 'FSL VHD'; 'frxsvc' = 'FSL App'; 'WemAgentSvc' = 'WEM'; 'BrokerAgent' = 'Broker' }
                 foreach ($svc in $drv.FslogixServices) {
                     $isRunning = $svc.Status -eq 'Running' -or $svc.Status -eq 4
                     $ampelClass = if ($isRunning) { 'ampel-green' } else { 'ampel-red' }
