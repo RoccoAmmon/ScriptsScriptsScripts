@@ -677,17 +677,20 @@ try {
 
             $sessionDisplay = if ($drv.Sessions -and $drv.Sessions -gt 0) { $drv.Sessions } else { '-' }
 
-            # FSLogix-Status farbig darstellen
-            $fslDisplay = @()
+            # FSLogix-Status als Ampeln
+            $fslHtml = ''
             if ($drv.FslogixServices -and $drv.FslogixServices.Count -gt 0) {
+                $svcBoxes = @()
+                $nameMap = @{ 'cyserver' = 'Cortex'; 'frxccds' = 'FSL VHD'; 'frxsvc' = 'FSL App' }
                 foreach ($svc in $drv.FslogixServices) {
                     $isRunning = $svc.Status -eq 'Running' -or $svc.Status -eq 4
-                    $dot = if ($isRunning) { '<span style="color:#27ae60;font-size:18px">&#9679;</span>' } else { '<span style="color:#e74c3c;font-size:18px">&#9679;</span>' }
-                    $title = "$($svc.Name) ($($svc.Status))"
-                    $fslDisplay += "<span title=""$title"" style=""cursor:default"">$dot $($svc.Name)</span>"
+                    $ampelClass = if ($isRunning) { 'ampel-green' } else { 'ampel-red' }
+                    $label = if ($nameMap.ContainsKey($svc.Name)) { $nameMap[$svc.Name] } else { $svc.DisplayName }
+                    $svcBoxes += "<span class=""ampel $ampelClass"" title=""$($svc.DisplayName) ($($svc.Status))"" style=""font-size:11px;min-width:auto;padding:2px 8px;cursor:default"">$label</span>"
                 }
+                $fslHtml = $svcBoxes -join ' '
             }
-            $fslHtml = if ($fslDisplay) { $fslDisplay -join '<br>' } else { '<span class="ampel ampel-gray" style="font-size:11px">keine</span>' }
+            if (-not $fslHtml) { $fslHtml = '<span class="ampel ampel-gray" style="font-size:11px">keine</span>' }
 
             [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td></tr>")
         }
