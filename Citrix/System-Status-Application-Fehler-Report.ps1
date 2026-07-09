@@ -262,16 +262,13 @@ try {
         try {
             $logDir = 'Y:\updateservice.log'
             if (Test-Path -Path $logDir -PathType Container -ErrorAction SilentlyContinue) {
-                $latestFile = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' -ErrorAction SilentlyContinue |
-                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                if ($latestFile) {
-                    $updateLine = Get-Content -Path $latestFile.FullName -ErrorAction SilentlyContinue |
-                        Where-Object { $_ -match "updateid\s+'(.+?)'" } |
-                        Select-Object -Last 1
-                    if ($updateLine -match "updateid\s+'(.+?)'") {
-                        $medicoUpdateId = $matches[1]
-                    }
-                }
+                $medicoUpdateId = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' -ErrorAction SilentlyContinue |
+                    ForEach-Object {
+                        $line = Get-Content -Path $_.FullName -ErrorAction SilentlyContinue |
+                            Where-Object { $_ -match "updateid\s+'(.+?)'" } |
+                            Select-Object -Last 1
+                        if ($line -match "updateid\s+'(.+?)'") { $matches[1] }
+                    } | Sort-Object -Descending | Select-Object -First 1
             }
         } catch {}
 
@@ -382,6 +379,9 @@ try {
 
     $Top10         = $TopProcesses | Sort-Object WS_MB -Descending | Select-Object -First 10
     $TopSessionRAM = $SessionRAMResults | Sort-Object SessionRAM_MB -Descending | Select-Object -First 10
+
+    $maxMedicoId = $DriveResults | Where-Object { $_.MedicoUpdateId } |
+        ForEach-Object { $_.MedicoUpdateId } | Sort-Object -Descending | Select-Object -First 1
 
     # =====================================================================
     # Region: Neue-Einträge-Erkennung (Piepton)
@@ -712,7 +712,13 @@ try {
             }
             if (-not $fslHtml) { $fslHtml = '<span class="ampel ampel-gray" style="font-size:11px">keine</span>' }
 
-            $medicoDisplay = if ($drv.MedicoUpdateId) { "<span style=""font-weight:600;font-size:12px"">$($drv.MedicoUpdateId)</span>" } else { '-' }
+            if ($drv.MedicoUpdateId) {
+                if ($maxMedicoId -and $drv.MedicoUpdateId -ne $maxMedicoId) {
+                    $medicoDisplay = "<span class=""ampel ampel-red"" style=""font-weight:600;font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$($drv.MedicoUpdateId)</span>"
+                } else {
+                    $medicoDisplay = "<span style=""font-weight:600;font-size:12px;color:#28a745"">$($drv.MedicoUpdateId)</span>"
+                }
+            } else { $medicoDisplay = '-' }
 
             [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td><td style=""text-align:center"">$medicoDisplay</td></tr>")
         }
