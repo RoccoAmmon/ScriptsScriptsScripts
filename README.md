@@ -28,7 +28,7 @@
 
 | Skript | Beschreibung |
 |--------|-------------|
-| [`System-Status-Application-Fehler-Report.ps1`](.wiki/System-Status-Report.md) | Erweiterter System-Status-Report – sammelt **Application Error/Hang/Popup**, **Service Control Manager** (Dienstabstürze) und **Windows Resource Exhaustion** (Speichermangel) von allen Servern einer OU. 🟢🟡🔴 Ampelanzeige für Speicherplatz D:, mcsdif.vhdx-Größe **und** freien Arbeitsspeicher. Zeigt aktive **Citrix Sessions**, **TOP 10 Speicherfresser** (WorkingSet) und **TOP 10 Session-RAM** (nach Benutzer gruppiert). Farbige EXE/DLL/Ausnahmecode/OOM-Hervorhebungen. 🔄 Auto-Refresh per `-Interval`, 🔔 Piepton bei neuen Events, 🔍 interaktive Filter im Browser. |
+| [`System-Status-Application-Fehler-Report.ps1`](.wiki/System-Status-Report.md) | Erweiterter System-Status-Report – sammelt **Application Error/Hang/Popup**, **Service Control Manager** (Dienstabstürze) und **Windows Resource Exhaustion** (Speichermangel) von allen Servern einer OU. 🟢🟡🔴 Ampelanzeige für Speicherplatz D:, mcsdif.vhdx-Größe, freien Arbeitsspeicher, **CPU-Auslastung**, **Auslagerungsdatei** und **FSLogix-Dienststatus**. Zeigt aktive **Citrix Sessions**, **TOP 10 Speicherfresser** (WorkingSet) und **TOP 10 Session-RAM** (nach Benutzer gruppiert). **Medico Update-Version** live abgerufen (mit Rot-Markierung bei veralteten Versionen). Farbige EXE/DLL/Ausnahmecode/OOM-Hervorhebungen. 🔄 Auto-Refresh per `-Interval`, 🔔 Piepton bei neuen Events, 🔍 interaktive Filter im Browser. 🎛️ Alle Schwellwerte als Variablen anpassbar. |
 | [`Optimierung_Citrix_PVS.ps1`](.wiki/Citrix-PVS-Optimierung.md) | Netzwerk- und Windows-Optimierung für Citrix PVS Target Devices. Deaktiviert Offload-Features (Checksum, Jumbo Packet), NIC-Energieverwaltung (3-Stufen-Fallback), IPv6, NetBIOS, Task Offload. Setzt Energieplan auf Höchstleistung, deaktiviert Ruhezustand. 🗃️ Vollständiges JSON-Backup + 🔄 **Rollback** aller Änderungen. |
 
 ---
@@ -38,12 +38,15 @@
 | Feature | System-Status-Report | PVS-Optimierung |
 |---------|:---:|:---:|
 | Eventlog-Sammlung (remote) | ✅ | – |
-| Live-Ampel-Anzeige (HDD, RAM, VHDX) | ✅ | – |
+| Live-Ampel-Anzeige (HDD, RAM, VHDX, CPU, Pagefile) | ✅ | – |
+| FSLogix & weitere Dienste (Cortex, WEM, Broker) | ✅ | – |
+| Medico Update-Version (live abgerufen) | ✅ | – |
 | Auto-Refresh (Intervall-Modus) | ✅ | – |
 | TOP 10 Auswertungen (Prozesse, Session-RAM) | ✅ | – |
 | In-Page-Modal für Prozessdetails | ✅ | – |
 | Interaktive Filter + Sortierung im Browser | ✅ | – |
 | Farbige Fehler-Hervorhebungen (EXE/DLL/Excode) | ✅ | – |
+| Anpassbare Schwellwerte (Variablen am Anfang) | ✅ | – |
 | WinForms-GUI mit Live-Log | – | ✅ |
 | 3-stufige NIC-Energieverwaltung | – | ✅ |
 | Rollback aller Änderungen | – | ✅ |
