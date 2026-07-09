@@ -677,7 +677,8 @@ try {
     if ($HasDrives) {
         [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
         [void]$Html.AppendLine('    <table id="ampelTable">')
-        [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th><th>Medico</th></tr>')
+        $medicoHeader = if ($EnableMedicoCheck) { '<th>Medico</th>' } else { '' }
+        [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th>' + $medicoHeader + '</tr>')
 
         foreach ($drv in ($DriveResults | Sort-Object Server)) {
             $serverName = $drv.Server
@@ -737,12 +738,16 @@ try {
             }
             if (-not $fslHtml) { $fslHtml = '<span class="ampel ampel-gray" style="font-size:11px">keine</span>' }
 
-            if ($drv.MedicoUpdateId) {
-                $medicoAmpel = if ($maxMedicoId -and $drv.MedicoUpdateId -ne $maxMedicoId) { 'ampel-red' } else { 'ampel-green' }
-                $medicoDisplay = "<span class=""ampel $medicoAmpel"" style=""font-weight:600;font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$($drv.MedicoUpdateId)</span>"
-            } else { $medicoDisplay = '-' }
+            $medicoCell = ''
+            if ($EnableMedicoCheck) {
+                if ($drv.MedicoUpdateId) {
+                    $medicoAmpel = if ($maxMedicoId -and $drv.MedicoUpdateId -ne $maxMedicoId) { 'ampel-red' } else { 'ampel-green' }
+                    $medicoDisplay = "<span class=""ampel $medicoAmpel"" style=""font-weight:600;font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$($drv.MedicoUpdateId)</span>"
+                } else { $medicoDisplay = '-' }
+                $medicoCell = '<td style="text-align:center">' + $medicoDisplay + '</td>'
+            }
 
-            [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td><td style=""text-align:center"">$medicoDisplay</td></tr>")
+            [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td>$medicoCell</tr>")
         }
         [void]$Html.AppendLine('    </table>')
     }
