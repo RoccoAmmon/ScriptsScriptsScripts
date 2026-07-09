@@ -112,8 +112,23 @@ foreach ($Computer in $Computers) {
         )
 
         try {
-            $Events = Get-WinEvent -ComputerName $Computer -FilterXPath $XPathFilter `
-                -LogName $LogName -ErrorAction Stop | Where-Object {
+            # -ErrorAction Stop NICHT verwenden, da sonst Warnungen wie
+            # "Beschreibungszeichenfolge" (unvollständige Message-Resolution)
+            # die Ereignisse unterdrücken würden
+            $rawEvents = Get-WinEvent -ComputerName $Computer -FilterXPath $XPathFilter `
+                -LogName $LogName -ErrorAction SilentlyContinue -WarningAction SilentlyContinue `
+                -ErrorVariable getErr
+
+            if (-not $rawEvents) {
+                if ($getErr -and $getErr[0].Exception.Message -match 'Keine Ereignisse gefunden|No events were found') {
+                    Write-Verbose "$Computer | $LogName | keine Fehler im Eventlog"
+                } elseif ($getErr) {
+                    Write-Warning "$Computer | $LogName | Fehler: $($getErr[0].Exception.Message)"
+                }
+                continue
+            }
+
+            $Events = $rawEvents | Where-Object {
                     $_.TimeCreated -ge $StartTime -and
                     (-not $Query.EventIDs -or ($_.Id -in $Query.EventIDs))
                 }
@@ -138,11 +153,7 @@ foreach ($Computer in $Computers) {
             }
         }
         catch [Exception] {
-            if ($_.Exception.Message -match 'Keine Ereignisse gefunden|No events were found') {
-                Write-Verbose "$Computer | $LogName | keine Fehler im Eventlog"
-            } else {
-                Write-Warning "$Computer | $LogName | Fehler: $_"
-            }
+            Write-Warning "$Computer | $LogName | Fehler: $_"
         }
     }
 }
