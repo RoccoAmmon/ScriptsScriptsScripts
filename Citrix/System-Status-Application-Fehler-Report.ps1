@@ -36,7 +36,7 @@
     .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -Interval 30
 
 .NOTES
-    Version  : 1.3
+    Version  : 1.4
     Autor    : Rocco Ammon
 #>
 
@@ -160,6 +160,22 @@ foreach ($Computer in $Computers) {
         }
     }
 }
+
+# Region: Neuen-Einträge-Erkennung (Piepton)
+$CacheFile = Join-Path -Path $ScriptDir -ChildPath "SystemStatusReport_Cache.json"
+$lastCount = 0
+if (Test-Path $CacheFile) {
+    try {
+        $cache = Get-Content $CacheFile -Raw | ConvertFrom-Json
+        $lastCount = $cache.LastEventCount
+    } catch {}
+}
+if ($Results.Count -gt $lastCount) {
+    [System.Console]::Beep(800, 400)
+    Start-Sleep -Milliseconds 200
+    [System.Console]::Beep(1000, 400)
+}
+@{ LastEventCount = $Results.Count; Timestamp = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') } | ConvertTo-Json | Set-Content $CacheFile -Encoding UTF8
 
 Write-Host "Eventlogs ausgewertet, sammle Systeminfos (Speicher, Dateien, RAM) ..." -ForegroundColor Cyan
 
@@ -348,6 +364,27 @@ $ScriptBlock = [System.Text.StringBuilder]::new()
 [void]$ScriptBlock.AppendLine('      })();')
 [void]$ScriptBlock.AppendLine('    }')
 [void]$ScriptBlock.AppendLine('  }')
+[void]$ScriptBlock.AppendLine('  // Piepton bei neuen Event-Einträgen (Web Audio API)')
+[void]$ScriptBlock.AppendLine('  (function() {')
+[void]$ScriptBlock.AppendLine('    var tbl = document.querySelector("table:not(#ampelTable)");')
+[void]$ScriptBlock.AppendLine('    if (!tbl) return;')
+[void]$ScriptBlock.AppendLine('    var rowCount = tbl.querySelectorAll("tr").length;')
+[void]$ScriptBlock.AppendLine('    var prevCount = sessionStorage.getItem("eventRowCount");')
+[void]$ScriptBlock.AppendLine('    if (prevCount !== null && parseInt(prevCount, 10) < rowCount) {')
+[void]$ScriptBlock.AppendLine('      try {')
+[void]$ScriptBlock.AppendLine('        var actx = new (window.AudioContext || window.webkitAudioContext)();')
+[void]$ScriptBlock.AppendLine('        var osc = actx.createOscillator();')
+[void]$ScriptBlock.AppendLine('        var gain = actx.createGain();')
+[void]$ScriptBlock.AppendLine('        osc.connect(gain);')
+[void]$ScriptBlock.AppendLine('        gain.connect(actx.destination);')
+[void]$ScriptBlock.AppendLine('        osc.frequency.value = 800;')
+[void]$ScriptBlock.AppendLine('        gain.gain.value = 0.3;')
+[void]$ScriptBlock.AppendLine('        osc.start(0);')
+[void]$ScriptBlock.AppendLine('        osc.stop(actx.currentTime + 0.3);')
+[void]$ScriptBlock.AppendLine('      } catch(e) {}')
+[void]$ScriptBlock.AppendLine('    }')
+[void]$ScriptBlock.AppendLine('    sessionStorage.setItem("eventRowCount", rowCount);')
+[void]$ScriptBlock.AppendLine('  })();')
 [void]$ScriptBlock.AppendLine('});')
 [void]$ScriptBlock.AppendLine('</script>')
 
