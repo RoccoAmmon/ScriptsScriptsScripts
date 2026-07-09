@@ -112,6 +112,9 @@ foreach ($Computer in $Computers) {
                 }
 
             foreach ($Event in $Events) {
+                $msg = ($Event.Message -replace '\r?\n', ' ')
+                # Dienstfehler mit "Windows Update" ignorieren
+                if ($msg -match 'Windows Update') { continue }
                 [void]$Results.Add([PSCustomObject]@{
                     Time     = $Event.TimeCreated
                     Server   = $Computer
@@ -123,7 +126,7 @@ foreach ($Computer in $Computers) {
                         default { "Level $($Event.Level)" }
                     }
                     Provider = $Event.ProviderName
-                    Message  = ($Event.Message -replace '\r?\n', ' ')
+                    Message  = $msg
                 })
             }
         }
