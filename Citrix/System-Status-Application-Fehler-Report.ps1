@@ -68,6 +68,21 @@ $firstRun              = $true
 $LogDir  = 'C:\ScriptLog'
 $LogFile = Join-Path -Path $LogDir -ChildPath 'System-Status-Application-Fehler-Report.log'
 
+# --- Schwellwerte Ampeln (anpassbar) ---
+$ThresholdDiskFreeRed    = 10   # Frei Speicher D: unter X% = rot
+$ThresholdDiskFreeYellow = 20   # Frei Speicher D: unter X% = gelb
+$ThresholdVhdxRed        = 30   # mcsdif.vhdx über X GB = rot
+$ThresholdVhdxYellow     = 20   # mcsdif.vhdx über X GB = gelb
+$ThresholdMemFreeRed     = 10   # Freier RAM unter X% = rot
+$ThresholdMemFreeYellow  = 20   # Freier RAM unter X% = gelb
+$ThresholdCpuRed         = 90   # CPU-Auslastung über X% = rot
+$ThresholdCpuYellow      = 75   # CPU-Auslastung über X% = gelb
+$ThresholdPageFileRed    = 90   # Pagefile-Auslastung über X% = rot
+$ThresholdPageFileYellow = 75   # Pagefile-Auslastung über X% = gelb
+$ThresholdSessionRed     = 14   # Sessions über X = rot
+$ThresholdSessionYellow  = 11   # Sessions über X = gelb
+$EnableMedicoCheck       = $true
+
 function Write-Log {
     param(
         [string]$Message,
@@ -259,21 +274,23 @@ try {
         } catch {}
 
         $medicoUpdateId = $null
-        try {
-            $logDir = 'Y:\updateservice.log'
-            if (Test-Path -Path $logDir -PathType Container -ErrorAction SilentlyContinue) {
-                $latestFile = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' -ErrorAction SilentlyContinue |
-                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                if ($latestFile) {
-                    $updateLine = Get-Content -Path $latestFile.FullName -ErrorAction SilentlyContinue |
-                        Where-Object { $_ -match "updateid\s+'(.+?)'" } |
-                        Select-Object -Last 1
-                    if ($updateLine -match "updateid\s+'(.+?)'") {
-                        $medicoUpdateId = $matches[1]
+        if ($using:EnableMedicoCheck) {
+            try {
+                $logDir = 'Y:\updateservice.log'
+                if (Test-Path -Path $logDir -PathType Container -ErrorAction SilentlyContinue) {
+                    $latestFile = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' -ErrorAction SilentlyContinue |
+                        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                    if ($latestFile) {
+                        $updateLine = Get-Content -Path $latestFile.FullName -ErrorAction SilentlyContinue |
+                            Where-Object { $_ -match "updateid\s+'(.+?)'" } |
+                            Select-Object -Last 1
+                        if ($updateLine -match "updateid\s+'(.+?)'") {
+                            $medicoUpdateId = $matches[1]
+                        }
                     }
                 }
-            }
-        } catch {}
+            } catch {}
+        }
 
         if ($drive) {
             $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
@@ -666,41 +683,41 @@ try {
             $serverName = $drv.Server
 
             if ($drv.FreePct -ne $null) {
-                if ($drv.FreePct -lt 10)      { $ampelSpeicher = 'ampel-red';    $statusSpeicher = "$($drv.FreePct)% frei" }
-                elseif ($drv.FreePct -lt 20)  { $ampelSpeicher = 'ampel-yellow'; $statusSpeicher = "$($drv.FreePct)% frei" }
+                if ($drv.FreePct -lt $ThresholdDiskFreeRed)      { $ampelSpeicher = 'ampel-red';    $statusSpeicher = "$($drv.FreePct)% frei" }
+                elseif ($drv.FreePct -lt $ThresholdDiskFreeYellow)  { $ampelSpeicher = 'ampel-yellow'; $statusSpeicher = "$($drv.FreePct)% frei" }
                 else                          { $ampelSpeicher = 'ampel-green';  $statusSpeicher = "$($drv.FreePct)% frei" }
             } else { $ampelSpeicher = 'ampel-gray'; $statusSpeicher = 'n/a' }
 
             if ($drv.VhdxExists -and $drv.VhdxSizeGB -ne $null) {
-                if ($drv.VhdxSizeGB -gt 30)      { $ampelDatei = 'ampel-red';    $statusDatei = "$($drv.VhdxSizeGB) GB" }
-                elseif ($drv.VhdxSizeGB -gt 20)  { $ampelDatei = 'ampel-yellow'; $statusDatei = "$($drv.VhdxSizeGB) GB" }
+                if ($drv.VhdxSizeGB -gt $ThresholdVhdxRed)      { $ampelDatei = 'ampel-red';    $statusDatei = "$($drv.VhdxSizeGB) GB" }
+                elseif ($drv.VhdxSizeGB -gt $ThresholdVhdxYellow)  { $ampelDatei = 'ampel-yellow'; $statusDatei = "$($drv.VhdxSizeGB) GB" }
                 else                             { $ampelDatei = 'ampel-green';  $statusDatei = "$($drv.VhdxSizeGB) GB" }
             } elseif ($drv.VhdxExists) { $ampelDatei = 'ampel-gray'; $statusDatei = 'Größe unbekannt' }
             else { $ampelDatei = 'ampel-gray'; $statusDatei = 'Datei fehlt' }
 
             if ($drv.MemFreePct -ne $null) {
-                if ($drv.MemFreePct -lt 10)     { $ampelMem = 'ampel-red';    $statusMem = "$($drv.MemFreePct)% frei" }
-                elseif ($drv.MemFreePct -lt 20) { $ampelMem = 'ampel-yellow'; $statusMem = "$($drv.MemFreePct)% frei" }
+                if ($drv.MemFreePct -lt $ThresholdMemFreeRed)     { $ampelMem = 'ampel-red';    $statusMem = "$($drv.MemFreePct)% frei" }
+                elseif ($drv.MemFreePct -lt $ThresholdMemFreeYellow) { $ampelMem = 'ampel-yellow'; $statusMem = "$($drv.MemFreePct)% frei" }
                 else                            { $ampelMem = 'ampel-green';  $statusMem = "$($drv.MemFreePct)% frei" }
             } else { $ampelMem = 'ampel-gray'; $statusMem = 'n/a' }
 
             # CPU-Ampel
             if ($drv.CpuPct -ne $null) {
-                if ($drv.CpuPct -ge 90)      { $ampelCpu = 'ampel-red';    $statusCpu = "$($drv.CpuPct)%" }
-                elseif ($drv.CpuPct -ge 75)  { $ampelCpu = 'ampel-yellow'; $statusCpu = "$($drv.CpuPct)%" }
+                if ($drv.CpuPct -ge $ThresholdCpuRed)      { $ampelCpu = 'ampel-red';    $statusCpu = "$($drv.CpuPct)%" }
+                elseif ($drv.CpuPct -ge $ThresholdCpuYellow)  { $ampelCpu = 'ampel-yellow'; $statusCpu = "$($drv.CpuPct)%" }
                 else                         { $ampelCpu = 'ampel-green';  $statusCpu = "$($drv.CpuPct)%" }
             } else { $ampelCpu = 'ampel-gray'; $statusCpu = 'n/a' }
 
             # Pagefile-Ampel
             if ($drv.PageFileUsagePct -ne $null) {
-                if ($drv.PageFileUsagePct -ge 90)      { $ampelPf = 'ampel-red';    $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
-                elseif ($drv.PageFileUsagePct -ge 75)  { $ampelPf = 'ampel-yellow'; $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
+                if ($drv.PageFileUsagePct -ge $ThresholdPageFileRed)      { $ampelPf = 'ampel-red';    $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
+                elseif ($drv.PageFileUsagePct -ge $ThresholdPageFileYellow)  { $ampelPf = 'ampel-yellow'; $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
                 else                                   { $ampelPf = 'ampel-green';  $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
             } else { $ampelPf = 'ampel-gray'; $statusPf = 'n/a' }
 
             if ($drv.Sessions -and $drv.Sessions -gt 0) {
-                if ($drv.Sessions -ge 14)      { $ampelS = 'ampel-red' }
-                elseif ($drv.Sessions -ge 11)  { $ampelS = 'ampel-yellow' }
+                if ($drv.Sessions -ge $ThresholdSessionRed)      { $ampelS = 'ampel-red' }
+                elseif ($drv.Sessions -ge $ThresholdSessionYellow)  { $ampelS = 'ampel-yellow' }
                 else                           { $ampelS = 'ampel-green' }
                 $sessionDisplay = "<span class=""ampel $ampelS"" style=""font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$($drv.Sessions)</span>"
             } else { $sessionDisplay = '<span class="ampel ampel-gray" style="font-size:12px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
