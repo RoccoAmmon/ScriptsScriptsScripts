@@ -82,6 +82,7 @@ $ThresholdPageFileYellow = 75   # Pagefile-Auslastung über X% = gelb
 $ThresholdSessionRed     = 14   # Sessions über X = rot
 $ThresholdSessionYellow  = 11   # Sessions über X = gelb
 $EnableMedicoCheck       = $true
+$ThrottleLimit           = 15   # Parallele Server-Abfragen (Invoke-Command)
 
 function Write-Log {
     param(
@@ -133,7 +134,7 @@ try {
         break
     }
 
-    Write-Host "$($Computers.Count) Server gefunden, starte parallele Abfragen (ThrottleLimit=15) ..." -ForegroundColor Cyan
+    Write-Host "$($Computers.Count) Server gefunden, starte parallele Abfragen (ThrottleLimit=$ThrottleLimit) ..." -ForegroundColor Cyan
     Write-Log  "$($Computers.Count) Server gefunden."
 
     # =====================================================================
@@ -323,7 +324,7 @@ try {
     }
 
     $allResults = Invoke-Command -ComputerName $Computers -ScriptBlock $ServerScriptBlock `
-        -ArgumentList $StartTime, $LogQueriesJson -ThrottleLimit 15 -ErrorAction SilentlyContinue
+        -ArgumentList $StartTime, $LogQueriesJson -ThrottleLimit $ThrottleLimit -ErrorAction SilentlyContinue
 
     # =====================================================================
     # Region: Ergebnisse einsammeln
