@@ -251,7 +251,7 @@ try {
         $fslogixServices = @()
         try {
             $fslogixServices = Get-Service |
-                Where-Object { $_.DisplayName -like '*FSLogix*' -or $_.Name -like '*fsl*' -or $_.Name -like '*frx*' } |
+                Where-Object { $_.DisplayName -like '*FSLogix*' -or $_.Name -like '*fsl*' -or $_.Name -like '*frx*' -or $_.Name -eq 'cyserver' } |
                 Select-Object Name, DisplayName,
                     @{N='Status';E={$_.Status.ToString()}},
                     StartType -ErrorAction Stop
