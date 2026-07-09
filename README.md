@@ -85,13 +85,6 @@ Ausführliche Dokumentation zu allen Skripten findest du im **[📚 Wiki](https:
 
 ```
 ScriptsScriptsScripts/
-├── .wiki/                          # 📚 Wiki-Dokumentation (Markdown)
-│   ├── Home.md
-│   ├── System-Status-Report.md
-│   ├── Citrix-PVS-Optimierung.md
-│   ├── Voraussetzungen.md
-│   ├── Fehlerbehebung.md
-│   └── Changelog.md
 ├── Citrix/
 │   ├── Optimierung_Citrix_PVS.ps1
 │   └── System-Status-Application-Fehler-Report.ps1
