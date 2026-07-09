@@ -96,6 +96,13 @@ $Results = [System.Collections.ArrayList]::new()
 foreach ($Computer in $Computers) {
     Write-Verbose "Verarbeite $Computer ..."
 
+    # Prüfen ob Server erreichbar ist
+    $reachable = Test-Connection -ComputerName $Computer -Count 1 -Quiet -ErrorAction SilentlyContinue
+    if (-not $reachable) {
+        Write-Warning "$Computer | nicht erreichbar"
+        continue
+    }
+
     foreach ($Query in $LogQueries) {
         $LogName  = $Query.LogName
         $Provider = $Query.Providers
@@ -131,7 +138,11 @@ foreach ($Computer in $Computers) {
             }
         }
         catch [Exception] {
-            Write-Warning "$Computer | $LogName nicht erreichbar oder keine Berechtigung: $_"
+            if ($_.Exception.Message -match 'Keine Ereignisse gefunden|No events were found') {
+                Write-Verbose "$Computer | $LogName | keine Fehler im Eventlog"
+            } else {
+                Write-Warning "$Computer | $LogName | Fehler: $_"
+            }
         }
     }
 }
