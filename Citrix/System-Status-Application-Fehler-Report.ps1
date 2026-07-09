@@ -252,7 +252,9 @@ try {
         try {
             $fslogixServices = Get-Service |
                 Where-Object { $_.DisplayName -like '*FSLogix*' -or $_.Name -like '*fsl*' -or $_.Name -like '*frx*' } |
-                Select-Object Name, DisplayName, Status, StartType -ErrorAction Stop
+                Select-Object Name, DisplayName,
+                    @{N='Status';E={$_.Status.ToString()}},
+                    StartType -ErrorAction Stop
         } catch {}
 
         if ($drive) {
@@ -679,8 +681,10 @@ try {
             $fslDisplay = @()
             if ($drv.FslogixServices -and $drv.FslogixServices.Count -gt 0) {
                 foreach ($svc in $drv.FslogixServices) {
-                    $color = if ($svc.Status -eq 'Running') { '#27ae60' } else { '#e74c3c' }
-                    $fslDisplay += "<span style=""color:$color;font-weight:600"">$($svc.Name)=$($svc.Status)</span>"
+                    $isRunning = $svc.Status -eq 'Running' -or $svc.Status -eq 4
+                    $dot = if ($isRunning) { '<span style="color:#27ae60;font-size:18px">&#9679;</span>' } else { '<span style="color:#e74c3c;font-size:18px">&#9679;</span>' }
+                    $title = "$($svc.Name) ($($svc.Status))"
+                    $fslDisplay += "<span title=""$title"" style=""cursor:default"">$dot $($svc.Name)</span>"
                 }
             }
             $fslHtml = if ($fslDisplay) { $fslDisplay -join '<br>' } else { '<span class="ampel ampel-gray" style="font-size:11px">keine</span>' }
