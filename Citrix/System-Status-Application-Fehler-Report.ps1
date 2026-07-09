@@ -220,11 +220,23 @@ foreach ($Computer in $Computers) {
         Write-Warning "$Computer | Arbeitsspeicher nicht ermittelbar: $_"
     }
 
-    # Citrix Sessions abfragen
+    # Sessions zählen (mehrere Methoden)
     $sessionCount = 0
+    # 1. explorer.exe pro Benutzersitzung (zuverlässig auf Terminalservern)
     try {
-        $sessionCount = @(Get-CimInstance -ComputerName $Computer -ClassName Win32_TerminalServicesSession -ErrorAction SilentlyContinue).Count
+        $procs = Get-CimInstance -ComputerName $Computer -ClassName Win32_Process `
+            -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue
+        if ($procs) { $sessionCount = @($procs).Count }
     } catch {}
+    # 2. Fallback: query session zählt nur aktive Sessions
+    if ($sessionCount -eq 0) {
+        try {
+            $qsRaw = Invoke-Command -ComputerName $Computer -ScriptBlock {
+                @(query session 2>$null | Select-String 'Active').Count
+            } -ErrorAction SilentlyContinue
+            if ($qsRaw) { $sessionCount = $qsRaw }
+        } catch {}
+    }
 
     if ($drive) {
         $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
