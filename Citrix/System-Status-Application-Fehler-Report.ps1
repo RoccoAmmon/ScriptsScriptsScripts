@@ -73,8 +73,8 @@ $LogQueries = @(
 )
 
 # Region: AD abfragen
+Write-Host "Suche Computer in OU: $SearchBase ..." -ForegroundColor Cyan
 try {
-    Write-Verbose "Suche Computer in OU: $SearchBase"
     $Computers = Get-ADComputer -Filter 'enabled -eq "true"' -SearchBase $SearchBase `
         -Properties Name -ErrorAction Stop | Select-Object -ExpandProperty Name
 }
@@ -88,13 +88,16 @@ if (-not $Computers) {
     break
 }
 
-Write-Verbose "Gefundene Server: $($Computers.Count)"
+Write-Host "$($Computers.Count) Server gefunden, sammle Eventlogs ..." -ForegroundColor Cyan
 
 # Region: Eventlogs sammeln
 $Results = [System.Collections.ArrayList]::new()
+$serverCount = $Computers.Count
+$currentServer = 0
 
 foreach ($Computer in $Computers) {
-    Write-Verbose "Verarbeite $Computer ..."
+    $currentServer++
+    Write-Host "[$currentServer/$serverCount] $Computer ..." -ForegroundColor Yellow
 
     # Prüfen ob Server erreichbar ist
     $reachable = Test-Connection -ComputerName $Computer -Count 1 -Quiet -ErrorAction SilentlyContinue
@@ -135,8 +138,8 @@ foreach ($Computer in $Computers) {
 
             foreach ($Event in $Events) {
                 $msg = ($Event.Message -replace '\r?\n', ' ')
-                # Dienstfehler mit "Windows Update" ignorieren
-                if ($msg -match 'Windows Update') { continue }
+                # Dienstfehler mit "Windows Update" oder "wuauserv" ignorieren
+                if ($msg -match 'Windows Update|wuauserv') { continue }
                 [void]$Results.Add([PSCustomObject]@{
                     Time     = $Event.TimeCreated
                     Server   = $Computer
@@ -158,10 +161,15 @@ foreach ($Computer in $Computers) {
     }
 }
 
+Write-Host "Eventlogs ausgewertet, sammle Systeminfos (Speicher, Dateien, RAM) ..." -ForegroundColor Cyan
+
 # Region: Festplatten-Status & Arbeitsspeicher sammeln (D:, mcsdif.vhdx, RAM)
 $DriveResults = [System.Collections.ArrayList]::new()
 
+$currentServer = 0
 foreach ($Computer in $Computers) {
+    $currentServer++
+    Write-Host "[$currentServer/$serverCount] $Computer ..." -ForegroundColor Yellow
     Write-Verbose "Sammle Systeminfos von $Computer ..."
     $drive = $null
     $fileInfo = $null
@@ -217,6 +225,8 @@ foreach ($Computer in $Computers) {
         MemFreePct     = if ($mem -and $mem.TotalVisibleMemorySize -gt 0) { [math]::Round(($mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize) * 100, 1) } else { $null }
     })
 }
+
+Write-Host "Erstelle HTML-Report ..." -ForegroundColor Cyan
 
 # Region: HTML erstellen
 $HasErrors = $Results.Count -gt 0
