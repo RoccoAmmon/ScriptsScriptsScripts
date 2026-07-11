@@ -230,8 +230,6 @@ $form.MinimumSize     = New-Object System.Drawing.Size(760, 640)   # sinnvolle U
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "Sizable"     # Fenster darf frei skaliert werden
 $form.MaximizeBox     = $true
-$form.AutoScaleMode   = 'Font'
-$form.Font            = New-Object System.Drawing.Font("Calibri", 10, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
 
 # --- Outlook-Icon für Taskleiste extrahieren ---
 $outlookExe = try { Get-ItemPropertyValue "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE" -Name '(default)' -ErrorAction Stop } catch { $null }
@@ -457,7 +455,7 @@ $form.Controls.Add($btnWeiterleiten)
 
 # --- Checkbox: Nur Anhang weiterleiten (neben dem Weiterleiten-Button) ---
 $chkNurAnhangWeiterleiten = New-Object System.Windows.Forms.CheckBox
-$chkNurAnhangWeiterleiten.Location = New-Object System.Drawing.Point(520, ($fensterHoe - 298))
+$chkNurAnhangWeiterleiten.Location = New-Object System.Drawing.Point(620, ($fensterHoe - 298))
 $chkNurAnhangWeiterleiten.Size     = New-Object System.Drawing.Size(170, 22)
 $chkNurAnhangWeiterleiten.Text     = "Nur Anhang weiterleiten"
 $chkNurAnhangWeiterleiten.Checked  = $false
@@ -466,7 +464,7 @@ $form.Controls.Add($chkNurAnhangWeiterleiten)
 
 # --- Checkbox: Nur PDFs weiterleiten (nur aktiv wenn "Nur Anhang" aktiv) ---
 $chkNurPDF = New-Object System.Windows.Forms.CheckBox
-$chkNurPDF.Location = New-Object System.Drawing.Point(520, ($fensterHoe - 274))
+$chkNurPDF.Location = New-Object System.Drawing.Point(620, ($fensterHoe - 274))
 $chkNurPDF.Size     = New-Object System.Drawing.Size(170, 22)
 $chkNurPDF.Text     = "Nur PDF-Anhänge"
 $chkNurPDF.Checked  = $true
@@ -510,8 +508,9 @@ $form.Controls.Add($txtVorschau)
 # --- Label + Liste: Anhänge (rechts neben der Vorschau) ---
 $lblAnhaenge = New-Object System.Windows.Forms.Label
 $lblAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 230))
-$lblAnhaenge.Size     = New-Object System.Drawing.Size(180, 18)
+$lblAnhaenge.Size     = New-Object System.Drawing.Size(180, 20)
 $lblAnhaenge.Text     = "Anhänge:"
+$lblAnhaenge.Font     = New-Object System.Drawing.Font($lblAnhaenge.Font, 'Bold')
 $lblAnhaenge.Anchor   = 'Bottom','Right'
 $form.Controls.Add($lblAnhaenge)
 
