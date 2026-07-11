@@ -230,8 +230,8 @@ $form.MinimumSize     = New-Object System.Drawing.Size(760, 640)   # sinnvolle U
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "Sizable"     # Fenster darf frei skaliert werden
 $form.MaximizeBox     = $true
-$form.AutoScaleMode   = 'Dpi'                           # schärfere Darstellung auf HiDPI
-$form.Font            = New-Object System.Drawing.Font("Segoe UI", 9)  # moderne, klarere Schrift
+$form.AutoScaleMode   = 'Font'                          # Schrift-basierte Skalierung für schärfere Darstellung
+$form.Font            = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
 
 # --- Outlook-Icon für Taskleiste extrahieren ---
 $outlookExe = try { Get-ItemPropertyValue "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE" -Name '(default)' -ErrorAction Stop } catch { $null }
