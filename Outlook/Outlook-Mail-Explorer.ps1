@@ -1,12 +1,12 @@
 ﻿<#
 ==================================================================================
- SCRIPT   : Outlook-Rechnung-Suche.ps1
+ SCRIPT   : Outlook-Mail-Explorer.ps1
  VERSION  : 1.0
  AUTOR    : Rocco Ammon
  DATUM    : 2026-07-11
 ==================================================================================
  BESCHREIBUNG:
-   Grafische Outlook-Suche (WinForms) mit Filter nach Suchwort, Datumsbereich
+   Grafischer Outlook-Mail-Explorer (WinForms) mit Filter nach Suchwort, Datumsbereich
    und Anhang. Durchsucht ein oder mehrere Postfächer (auch alle gleichzeitig)
    und listet Treffer in einer sortierbaren Liste. Pro Mail: Vorschau des
    Inhalts, Anhänge öffnen/speichern, Weiterleitung (ganze Mail oder nur
@@ -64,6 +64,55 @@ try {
     # Windows-Forms-Bibliotheken laden (für GUI)
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
+
+    # IComparer für ListView-Sortierung per Spaltenklick
+    Add-Type @"
+    using System;
+    using System.Collections;
+    using System.Windows.Forms;
+
+    public class ListViewColumnSorter : IComparer {
+        public int Column { get; set; }
+        public SortOrder SortDirection { get; set; }
+
+        public ListViewColumnSorter() {
+            Column = 0;
+            SortDirection = SortOrder.Ascending;
+        }
+
+        public ListViewColumnSorter(int column, SortOrder direction) {
+            Column = column;
+            SortDirection = direction;
+        }
+
+        public int Compare(object x, object y) {
+            ListViewItem itemX = (ListViewItem)x;
+            ListViewItem itemY = (ListViewItem)y;
+            string textX = itemX.SubItems[Math.Min(Column, itemX.SubItems.Count - 1)].Text;
+            string textY = itemY.SubItems[Math.Min(Column, itemY.SubItems.Count - 1)].Text;
+
+            // Datum-Sortierung für Spalte 0
+            if (Column == 0) {
+                DateTime dateX, dateY;
+                if (DateTime.TryParse(textX, out dateX) && DateTime.TryParse(textY, out dateY)) {
+                    return SortDirection == SortOrder.Ascending
+                        ? DateTime.Compare(dateX, dateY) : DateTime.Compare(dateY, dateX);
+                }
+            }
+
+            // Numerische Sortierung
+            double dblX, dblY;
+            if (double.TryParse(textX, out dblX) && double.TryParse(textY, out dblY)) {
+                return SortDirection == SortOrder.Ascending
+                    ? dblX.CompareTo(dblY) : dblY.CompareTo(dblX);
+            }
+
+            // Standard: String-Vergleich
+            int strResult = string.Compare(textX, textY, StringComparison.CurrentCultureIgnoreCase);
+            return SortDirection == SortOrder.Ascending ? strResult : -strResult;
+        }
+    }
+"@ -ReferencedAssemblies System.Windows.Forms
 }
 catch {
     Write-Host "Kritischer Fehler bei der Vorbereitung: $($_.Exception.Message)" -ForegroundColor Red
@@ -331,6 +380,20 @@ $ergebnisListe.Anchor        = 'Top','Bottom','Left','Right'
 [void]$ergebnisListe.Columns.Add("Anhang", 70)
 [void]$ergebnisListe.Columns.Add("Weiterl.", 80)
 $form.Controls.Add($ergebnisListe)
+
+# --- Sortierung per Spaltenklick ---
+$ergebnisListe.Add_ColumnClick({
+    param($sender, $e)
+    $sorter = $sender.ListViewItemSorter
+    if ($sorter -and $sorter.Column -eq $e.Column) {
+        # Gleiche Spalte: Richtung umkehren
+        $sorter.SortDirection = if ($sorter.SortDirection -eq 'Ascending') { 'Descending' } else { 'Ascending' }
+    } else {
+        # Neue Spalte: aufsteigend sortieren
+        $sender.ListViewItemSorter = New-Object ListViewColumnSorter($e.Column, 'Ascending')
+    }
+    $sender.Sort()
+})
 
 # --- Aktions-Buttons unter der Liste (am unteren Rand verankert) ---
 $btnInhalt = New-Object System.Windows.Forms.Button
