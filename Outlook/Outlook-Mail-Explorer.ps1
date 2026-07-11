@@ -372,6 +372,7 @@ $ergebnisListe.Size          = New-Object System.Drawing.Size(($fensterBrt - 55)
 $ergebnisListe.View          = 'Details'
 $ergebnisListe.FullRowSelect = $true
 $ergebnisListe.GridLines     = $true
+$ergebnisListe.MultiSelect   = $true
 # Anker: oben+links+rechts fixiert, Höhe wächst mit -> Top,Bottom,Left,Right
 $ergebnisListe.Anchor        = 'Top','Bottom','Left','Right'
 [void]$ergebnisListe.Columns.Add("Datum", 120)
@@ -769,141 +770,145 @@ $btnWeiterleiten.Add_Click({
             return
         }
 
-        # --- Pruefen, ob eine Mail in der Liste ausgewaehlt ist ---
+        # --- Pruefen, ob Mails in der Liste ausgewaehlt sind ---
         if ($null -eq $ergebnisListe.SelectedItems -or $ergebnisListe.SelectedItems.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show(
-                "Bitte zuerst eine Mail in der Liste auswaehlen.",
+                "Bitte zuerst eine oder mehrere Mails auswaehlen (Strg+Klick).",
                 "Hinweis", 'OK', 'Information')
             return
         }
 
-        # --- Original-MailItem über den GUID-Schlüssel im Dictionary holen (FIX) ---
-        $ausgewaehlterEintrag = $ergebnisListe.SelectedItems[0]
-        $key                  = $ausgewaehlterEintrag.Tag          # Tag = GUID-Schlüssel
-        $originalMail         = $Global:GefundeneMails[$key]        # <-- echte Mail holen
-
-        if ($null -eq $originalMail) {
-            throw "Zum ausgewaehlten Listeneintrag konnte keine Original-Mail gefunden werden."
-        }
-
-        # --- Prüfen ob diese Mail bereits an die Zieladresse weitergeleitet wurde ---
         $weiterleitungsDatei = Join-Path $LogVerzeichnis "Outlook_Weiterleitungen.json"
-        $bereitsWeitergeleitet = $false
-        try {
-            $mailId = $originalMail.EntryID
-            if (-not [string]::IsNullOrWhiteSpace($mailId) -and (Test-Path $weiterleitungsDatei)) {
-                $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
-                foreach ($eintrag in $historie) {
-                    if ($eintrag.MailId -eq $mailId -and $eintrag.Empfaenger -eq $zielAdresse) {
-                        $bereitsWeitergeleitet = $true
-                        break
+
+        # --- Alle ausgewaehlten Mails ermitteln und auf bereits weitergeleitet pruefen ---
+        $zuSenden = @()       # Mails, die noch nicht weitergeleitet wurden
+        $bereitsWeg = @()     # Mails, die schon weitergeleitet wurden
+        foreach ($lvItem in $ergebnisListe.SelectedItems) {
+            $key   = $lvItem.Tag
+            $mail  = $Global:GefundeneMails[$key]
+            if ($null -eq $mail) { continue }
+
+            $schonWeg = $false
+            try {
+                if (-not [string]::IsNullOrWhiteSpace($mail.EntryID) -and (Test-Path $weiterleitungsDatei)) {
+                    $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
+                    foreach ($h in $historie) {
+                        if ($h.MailId -eq $mail.EntryID -and $h.Empfaenger -eq $zielAdresse) {
+                            $schonWeg = $true
+                            break
+                        }
                     }
                 }
-            }
-        }
-        catch {
-            Write-Log -Text "Fehler beim Prüfen der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN
+            } catch { }
+
+            if ($schonWeg) { $bereitsWeg += $mail } else { $zuSenden += $mail }
         }
 
-        if ($bereitsWeitergeleitet) {
-            $antwort = [System.Windows.Forms.MessageBox]::Show(
-                "Diese Mail wurde bereits an '$zielAdresse' weitergeleitet (am $($eintrag.Datum)).`n`nTrotzdem erneut senden?",
-                "Bereits weitergeleitet", 'YesNo', 'Warning')
+        # --- Nachfragen wenn einige bereits weitergeleitet wurden ---
+        if ($bereitsWeg.Count -gt 0 -and $zuSenden.Count -gt 0) {
+            $meldung = "$($bereitsWeg.Count) von $($ergebnisListe.SelectedItems.Count) Mails wurden bereits an '$zielAdresse' weitergeleitet.`n`nDie restlichen $($zuSenden.Count) trotzdem senden?"
+            $antwort = [System.Windows.Forms.MessageBox]::Show($meldung, "Bereits weitergeleitet", 'YesNo', 'Warning')
             if ($antwort -eq 'No') { return }
         }
+        elseif ($bereitsWeg.Count -gt 0 -and $zuSenden.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Alle ausgewaehlten Mails wurden bereits an '$zielAdresse' weitergeleitet.",
+                "Hinweis", 'OK', 'Information')
+            return
+        }
 
-        # --- Weiterleitung: entweder ganze Mail oder nur Anhänge ---
-        if ($chkNurAnhangWeiterleiten.Checked) {
-            # --- Nur Anhänge weiterleiten ---
-            if ($originalMail.Attachments.Count -eq 0) {
-                [System.Windows.Forms.MessageBox]::Show(
-                    "Diese Mail hat keine Anhänge zum Weiterleiten.","Hinweis",'OK','Information')
-                return
-            }
+        # --- Temporäres Verzeichnis für Anhänge (einmalig anlegen) ---
+        $tmpDir = Join-Path $env:TEMP "OutlookMailsuche_Weiterleitung"
+        if (-not (Test-Path $tmpDir)) {
+            New-Item -Path $tmpDir -ItemType Directory -Force | Out-Null
+        }
 
-            # Temporäres Verzeichnis für Anhänge
-            $tmpDir = Join-Path $env:TEMP "OutlookMailsuche_Weiterleitung"
-            if (-not (Test-Path $tmpDir)) {
-                New-Item -Path $tmpDir -ItemType Directory -Force | Out-Null
-            }
+        $erfolgreich = 0
+        $historieNeu = @()
 
-            # Alle Anhänge speichern
-            $savedFiles = @()
-            foreach ($att in $originalMail.Attachments) {
-                $fileName = $att.FileName -replace '[<>:"/\\|?*]', '_'
-                $filePath = Join-Path $tmpDir $fileName
-                $counter = 1
-                $baseName = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
-                $extension = [System.IO.Path]::GetExtension($fileName)
-                while (Test-Path $filePath) {
-                    $fileName = "$baseName($counter)$extension"
-                    $filePath = Join-Path $tmpDir $fileName
-                    $counter++
+        :weiterleitung foreach ($originalMail in $zuSenden) {
+            try {
+                if ($chkNurAnhangWeiterleiten.Checked) {
+                    # --- Nur Anhänge weiterleiten ---
+                    if ($originalMail.Attachments.Count -eq 0) {
+                        Write-Log -Text "Mail '$($originalMail.Subject)' hat keine Anhaenge - uebersprungen." -Level WARN
+                        continue weiterleitung
+                    }
+
+                    # Anhänge speichern
+                    $savedFiles = @()
+                    foreach ($att in $originalMail.Attachments) {
+                        $fileName = $att.FileName -replace '[<>:"/\\|?*]', '_'
+                        $filePath = Join-Path $tmpDir $fileName
+                        $counter = 1
+                        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+                        $extension = [System.IO.Path]::GetExtension($fileName)
+                        while (Test-Path $filePath) {
+                            $fileName = "$baseName($counter)$extension"
+                            $filePath = Join-Path $tmpDir $fileName
+                            $counter++
+                        }
+                        $att.SaveAsFile($filePath)
+                        $savedFiles += $filePath
+                    }
+
+                    # Neue Mail mit Anhängen erstellen und senden
+                    $newMail = $outlook.CreateItem(0)
+                    $newMail.Subject = "Weitergeleitete Anhaenge: $($originalMail.Subject)"
+                    $newMail.Body = "Anhaenge aus der Mail '$($originalMail.Subject)' vom $($originalMail.ReceivedTime.ToString('dd.MM.yyyy')) werden hiermit weitergeleitet."
+                    foreach ($file in $savedFiles) {
+                        $newMail.Attachments.Add($file) | Out-Null
+                    }
+                    $newMail.Recipients.Add($zielAdresse) | Out-Null
+                    $newMail.Recipients.ResolveAll() | Out-Null
+                    $newMail.Send()
+
+                    # Temp-Dateien aufräumen
+                    foreach ($file in $savedFiles) {
+                        Remove-Item $file -Force -ErrorAction SilentlyContinue
+                    }
+
+                    Write-Log -Text "Anhaenge aus '$($originalMail.Subject)' ($($savedFiles.Count) Datei(en)) an '$zielAdresse' weitergeleitet." -Level INFO
                 }
-                $att.SaveAsFile($filePath)
-                $savedFiles += $filePath
+                else {
+                    # --- Ganze Mail weiterleiten ---
+                    $weiterleitung = $originalMail.Forward()
+                    $weiterleitung.Recipients.Add($zielAdresse) | Out-Null
+                    if (-not $weiterleitung.Recipients.ResolveAll()) {
+                        Write-Log -Text "Empfaenger '$zielAdresse' nicht vollstaendig aufloesbar - wird trotzdem versendet." -Level WARN
+                    }
+                    $weiterleitung.Send()
+                    Write-Log -Text "Mail '$($originalMail.Subject)' weitergeleitet an '$zielAdresse'." -Level INFO
+                }
+
+                # Historie-Eintrag merken (spaeter gemeinsam speichern)
+                $historieNeu += @{
+                    MailId     = $originalMail.EntryID
+                    Empfaenger = $zielAdresse
+                    Datum      = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                }
+                $erfolgreich++
             }
-
-            # Neue Mail mit Anhängen erstellen und senden
-            $newMail = $outlook.CreateItem(0) # olMailItem
-            $newMail.Subject = "Weitergeleitete Anhänge: $($originalMail.Subject)"
-            $newMail.Body = "Anhänge aus der Mail '$($originalMail.Subject)' vom $($originalMail.ReceivedTime.ToString('dd.MM.yyyy')) werden hiermit weitergeleitet."
-            foreach ($file in $savedFiles) {
-                $newMail.Attachments.Add($file) | Out-Null
+            catch {
+                Write-Log -Text "Fehler beim Weiterleiten von '$($originalMail.Subject)': $($_.Exception.Message)" -Level ERROR
             }
-            $newMail.Recipients.Add($zielAdresse) | Out-Null
-            $newMail.Recipients.ResolveAll() | Out-Null
-            $newMail.Send()
-
-            # Temp-Dateien aufräumen
-            foreach ($file in $savedFiles) {
-                Remove-Item $file -Force -ErrorAction SilentlyContinue
-            }
-
-            # Weiterleitung in Historie vermerken
-            try {
-                $eintrag = @{ MailId = $originalMail.EntryID; Empfaenger = $zielAdresse; Datum = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") }
-                if (Test-Path $weiterleitungsDatei) {
-                    $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
-                } else { $historie = @() }
-                $historie += $eintrag
-                $historie | ConvertTo-Json -Depth 1 | Out-File -FilePath $weiterleitungsDatei -Encoding UTF8
-            } catch { Write-Log -Text "Fehler beim Speichern der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN }
-
-            Write-Log -Text "Anhänge aus '$($originalMail.Subject)' ($($savedFiles.Count) Datei(en)) an '$zielAdresse' weitergeleitet." -Level INFO
-            $lblStatus.Text = "$($savedFiles.Count) Anhang/Anhänge an '$zielAdresse' weitergeleitet."
-            [System.Windows.Forms.MessageBox]::Show(
-                "$($savedFiles.Count) Anhang/Anhänge wurde(n) an $zielAdresse weitergeleitet.",
-                "Erfolg",'OK','Information')
         }
-        else {
-            # --- Ganze Mail weiterleiten (bisheriges Verhalten) ---
-            $weiterleitung = $originalMail.Forward()
-            $weiterleitung.Recipients.Add($zielAdresse) | Out-Null
 
-            # Empfaenger aufloesen (nur Warnung, kein Abbruch)
-            if (-not $weiterleitung.Recipients.ResolveAll()) {
-                Write-Log -Text "Empfaenger '$zielAdresse' nicht vollstaendig aufloesbar - wird trotzdem versendet." -Level WARN
+        # --- Alle neuen Historie-Eintraege auf einmal speichern ---
+        try {
+            $historieVorhanden = @()
+            if (Test-Path $weiterleitungsDatei) {
+                $historieVorhanden = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
             }
+            $historieVorhanden += $historieNeu
+            $historieVorhanden | ConvertTo-Json -Depth 1 | Out-File -FilePath $weiterleitungsDatei -Encoding UTF8
+        } catch { Write-Log -Text "Fehler beim Speichern der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN }
 
-            $weiterleitung.Send()
-
-            # Weiterleitung in Historie vermerken
-            try {
-                $eintrag = @{ MailId = $originalMail.EntryID; Empfaenger = $zielAdresse; Datum = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") }
-                if (Test-Path $weiterleitungsDatei) {
-                    $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
-                } else { $historie = @() }
-                $historie += $eintrag
-                $historie | ConvertTo-Json -Depth 1 | Out-File -FilePath $weiterleitungsDatei -Encoding UTF8
-            } catch { Write-Log -Text "Fehler beim Speichern der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN }
-
-            Write-Log -Text "Mail '$($originalMail.Subject)' weitergeleitet an '$zielAdresse'." -Level INFO
-            $lblStatus.Text = "Mail erfolgreich an '$zielAdresse' weitergeleitet."
-            [System.Windows.Forms.MessageBox]::Show(
-                "Die Mail wurde erfolgreich an '$zielAdresse' weitergeleitet.",
-                "Erfolg",'OK','Information')
-        }
+        # --- Zusammenfassung ---
+        $lblStatus.Text = "$erfolgreich von $($zuSenden.Count) Mail(s) an '$zielAdresse' weitergeleitet."
+        [System.Windows.Forms.MessageBox]::Show(
+            "$erfolgreich von $($zuSenden.Count) Mail(s) wurden erfolgreich an '$zielAdresse' weitergeleitet.",
+            "Erfolg",'OK','Information')
     }
     catch {
         # --- Zentrale Fehlerbehandlung mit Logging ---
