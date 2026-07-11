@@ -322,9 +322,11 @@ $txtZiel.Add_TextChanged({
     $ziel = $txtZiel.Text.Trim()
     $histDatei = Join-Path $LogVerzeichnis "Outlook_Weiterleitungen.json"
     $hist = @()
-    try {
-        if (Test-Path $histDatei) { $hist = Get-Content -Path $histDatei -Raw -Encoding UTF8 | ConvertFrom-Json }
-    } catch { }
+    if (Test-Path $histDatei) {
+        try {
+            $hist = @(Get-Content -Path $histDatei -Raw -Encoding UTF8 | ConvertFrom-Json)
+        } catch { $hist = @() }
+    }
     foreach ($item in $ergebnisListe.Items) {
         $key = $item.Tag
         $mail = $Global:GefundeneMails[$key]
@@ -783,23 +785,29 @@ $btnWeiterleiten.Add_Click({
         # --- Alle ausgewaehlten Mails ermitteln und auf bereits weitergeleitet pruefen ---
         $zuSenden = @()       # Mails, die noch nicht weitergeleitet wurden
         $bereitsWeg = @()     # Mails, die schon weitergeleitet wurden
+        # Historie einmal laden (fuer Pruefung UND spaeteres Speichern)
+        $historieGesamt = @()
+        if (Test-Path $weiterleitungsDatei) {
+            try {
+                $historieGesamt = @(Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json)
+            } catch {
+                $historieGesamt = @()
+            }
+        }
         foreach ($lvItem in $ergebnisListe.SelectedItems) {
             $key   = $lvItem.Tag
             $mail  = $Global:GefundeneMails[$key]
             if ($null -eq $mail) { continue }
 
             $schonWeg = $false
-            try {
-                if (-not [string]::IsNullOrWhiteSpace($mail.EntryID) -and (Test-Path $weiterleitungsDatei)) {
-                    $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
-                    foreach ($h in $historie) {
-                        if ($h.MailId -eq $mail.EntryID -and $h.Empfaenger -eq $zielAdresse) {
-                            $schonWeg = $true
-                            break
-                        }
+            if (-not [string]::IsNullOrWhiteSpace($mail.EntryID)) {
+                foreach ($h in $historieGesamt) {
+                    if ($h.MailId -eq $mail.EntryID -and $h.Empfaenger -eq $zielAdresse) {
+                        $schonWeg = $true
+                        break
                     }
                 }
-            } catch { }
+            }
 
             if ($schonWeg) { $bereitsWeg += $mail } else { $zuSenden += $mail }
         }
@@ -880,27 +888,47 @@ $btnWeiterleiten.Add_Click({
                     Write-Log -Text "Mail '$($originalMail.Subject)' weitergeleitet an '$zielAdresse'." -Level INFO
                 }
 
-                # --- Historie sofort speichern (nach jeder Mail, fuer Ausfallsicherheit) ---
-                $eintrag = @{
+                # --- Historie-Eintrag merken ---
+                $historieGesamt += @{
                     MailId     = $originalMail.EntryID
                     Empfaenger = $zielAdresse
                     Datum      = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
                 }
-                try {
-                    $historie = @()
-                    if (Test-Path $weiterleitungsDatei) {
-                        $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
-                    }
-                    $historie += $eintrag
-                    $historie | ConvertTo-Json -Depth 1 | Out-File -FilePath $weiterleitungsDatei -Encoding UTF8
-                } catch {
-                    Write-Log -Text "Fehler beim Speichern der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN
-                }
-
                 $erfolgreich++
             }
             catch {
                 Write-Log -Text "Fehler beim Weiterleiten von '$($originalMail.Subject)': $($_.Exception.Message)" -Level ERROR
+            }
+        }
+
+        # --- Historie speichern (alle Eintraege auf einmal) ---
+        if ($historieGesamt.Count -gt 0) {
+            try {
+                $historieGesamt | ConvertTo-Json -Depth 1 | Out-File -FilePath $weiterleitungsDatei -Encoding UTF8
+            }
+            catch {
+                $fehlerMsg = "Fehler beim Speichern der Weiterleitungs-Historie: $($_.Exception.Message)"
+                Write-Log -Text $fehlerMsg -Level WARN
+                [System.Windows.Forms.MessageBox]::Show($fehlerMsg, "Warnung", 'OK', 'Warning')
+            }
+        }
+
+        # --- Weiterleitungs-Spalte aktualisieren ---
+        if ($erfolgreich -gt 0) {
+            foreach ($item in $ergebnisListe.Items) {
+                $key  = $item.Tag
+                $mail = $Global:GefundeneMails[$key]
+                if (-not $mail) { continue }
+                $weg = ""
+                if ($mail.EntryID) {
+                    foreach ($h in $historieGesamt) {
+                        if ($h.MailId -eq $mail.EntryID -and $h.Empfaenger -eq $zielAdresse) {
+                            $weg = "Ja"
+                            break
+                        }
+                    }
+                }
+                if ($item.SubItems.Count -ge 5) { $item.SubItems[4].Text = $weg }
             }
         }
 
