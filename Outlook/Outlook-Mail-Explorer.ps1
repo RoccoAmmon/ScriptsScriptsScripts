@@ -455,7 +455,7 @@ $form.Controls.Add($btnWeiterleiten)
 
 # --- Checkbox: Nur Anhang weiterleiten (neben dem Weiterleiten-Button) ---
 $chkNurAnhangWeiterleiten = New-Object System.Windows.Forms.CheckBox
-$chkNurAnhangWeiterleiten.Location = New-Object System.Drawing.Point(520, ($fensterHoe - 298))
+$chkNurAnhangWeiterleiten.Location = New-Object System.Drawing.Point(620, ($fensterHoe - 298))
 $chkNurAnhangWeiterleiten.Size     = New-Object System.Drawing.Size(170, 22)
 $chkNurAnhangWeiterleiten.Text     = "Nur Anhang weiterleiten"
 $chkNurAnhangWeiterleiten.Checked  = $false
@@ -464,7 +464,7 @@ $form.Controls.Add($chkNurAnhangWeiterleiten)
 
 # --- Checkbox: Nur PDFs weiterleiten (nur aktiv wenn "Nur Anhang" aktiv) ---
 $chkNurPDF = New-Object System.Windows.Forms.CheckBox
-$chkNurPDF.Location = New-Object System.Drawing.Point(520, ($fensterHoe - 274))
+$chkNurPDF.Location = New-Object System.Drawing.Point(620, ($fensterHoe - 274))
 $chkNurPDF.Size     = New-Object System.Drawing.Size(170, 22)
 $chkNurPDF.Text     = "Nur PDF-Anhänge"
 $chkNurPDF.Checked  = $true
