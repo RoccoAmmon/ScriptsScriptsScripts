@@ -1,9 +1,9 @@
 ﻿<#
 ==================================================================================
  SCRIPT   : Outlook-Mail-Explorer.ps1
- VERSION  : 1.1
+ VERSION  : 1.2
  AUTOR    : Rocco Ammon
- DATUM    : 2026-07-11
+ DATUM    : 2026-07-12
 ==================================================================================
  BESCHREIBUNG:
    Grafischer Outlook-Mail-Explorer (WinForms) mit Filter nach Suchwort, Datumsbereich
@@ -22,6 +22,8 @@
    - Vorschau des Mail-Inhalts bei Klick
    - Anhänge öffnen (Doppelklick oder Button)
    - Weiterleitung: ganze Mail oder nur Anhänge (umschaltbar)
+   - PDF-Filter: nur PDF-Anhänge bei Weiterleitung (optional)
+   - Navigations-Buttons (▲/▼) zum Durchblättern der Treffer
    - Weiterleitungs-Historie (erkennt doppelte Sendungen)
    - Live-Update der Weiterleitungs-Spalte bei Adressänderung
    - Auto-Update der Weiterl.-Spalte nach dem Weiterleiten
