@@ -444,6 +444,21 @@ $chkNurAnhangWeiterleiten.Checked  = $false
 $chkNurAnhangWeiterleiten.Anchor   = 'Bottom','Left'
 $form.Controls.Add($chkNurAnhangWeiterleiten)
 
+# --- Checkbox: Nur PDFs weiterleiten (nur aktiv wenn "Nur Anhang" aktiv) ---
+$chkNurPDF = New-Object System.Windows.Forms.CheckBox
+$chkNurPDF.Location = New-Object System.Drawing.Point(520, ($fensterHoe - 274))
+$chkNurPDF.Size     = New-Object System.Drawing.Size(170, 22)
+$chkNurPDF.Text     = "Nur PDF-Anhänge"
+$chkNurPDF.Checked  = $true
+$chkNurPDF.Anchor   = 'Bottom','Left'
+$chkNurPDF.Enabled  = $chkNurAnhangWeiterleiten.Checked
+$form.Controls.Add($chkNurPDF)
+
+# Nur-PDF-Checkbox deaktivieren wenn "Nur Anhang" ausgehakt ist
+$chkNurAnhangWeiterleiten.Add_CheckedChanged({
+    $chkNurPDF.Enabled = $chkNurAnhangWeiterleiten.Checked
+})
+
 # --- Fortschrittsanzeige (unten verankert) ---
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Location  = New-Object System.Drawing.Point(15, ($fensterHoe - 265))
@@ -855,13 +870,15 @@ $btnWeiterleiten.Add_Click({
                         continue weiterleitung
                     }
 
-                    # Anhänge speichern (nur PDFs)
+                    # Anhänge speichern (optional nur PDFs)
                     $savedFiles = @()
                     foreach ($att in $originalMail.Attachments) {
-                        $ext = [System.IO.Path]::GetExtension($att.FileName)
-                        if ($ext -notmatch '\.pdf') {
-                            Write-Log -Text "Anhang '$($att.FileName)' ist keine PDF - uebersprungen." -Level INFO
-                            continue
+                        if ($chkNurPDF.Checked) {
+                            $ext = [System.IO.Path]::GetExtension($att.FileName)
+                            if ($ext -notmatch '\.pdf') {
+                                Write-Log -Text "Anhang '$($att.FileName)' ist keine PDF - uebersprungen." -Level INFO
+                                continue
+                            }
                         }
                         $fileName = $att.FileName -replace '[<>:"/\\|?*]', '_'
                         $filePath = Join-Path $tmpDir $fileName
@@ -877,8 +894,8 @@ $btnWeiterleiten.Add_Click({
                         $savedFiles += $filePath
                     }
 
-                    # Keine PDFs → Mail überspringen
-                    if ($savedFiles.Count -eq 0) {
+                    # Keine PDFs (bei aktiviertem Filter) → Mail überspringen
+                    if ($chkNurPDF.Checked -and $savedFiles.Count -eq 0) {
                         Write-Log -Text "Mail '$($originalMail.Subject)' enthaelt keine PDF-Anhaenge - uebersprungen." -Level WARN
                         continue weiterleitung
                     }
