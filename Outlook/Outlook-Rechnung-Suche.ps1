@@ -1,0 +1,865 @@
+﻿<#
+==================================================================================
+ SCRIPT   : Outlook-Rechnung-Suche.ps1
+ VERSION  : 1.0
+ AUTOR    : Rocco Ammon
+ DATUM    : 2026-07-11
+==================================================================================
+ BESCHREIBUNG:
+   Grafische Outlook-Suche (WinForms) mit Filter nach Suchwort, Datumsbereich
+   und Anhang. Durchsucht ein oder mehrere Postfächer (auch alle gleichzeitig)
+   und listet Treffer in einer sortierbaren Liste. Pro Mail: Vorschau des
+   Inhalts, Anhänge öffnen/speichern, Weiterleitung (ganze Mail oder nur
+   Anhänge). Prüft, ob eine Mail bereits an die eingetragene Adresse
+   weitergeleitet wurde und zeigt dies in der Trefferliste an.
+
+ FEATURES:
+   - Suche über alle oder ausgewählte Postfächer
+   - Filter: Suchwort (Betreff + Text), Datumsbereich, nur mit Anhang
+   - Ergebnisliste mit Datum, Absender, Betreff, Anhang, Weiterleitungsstatus
+   - Vorschau des Mail-Inhalts bei Klick
+   - Anhänge öffnen (Doppelklick oder Button)
+   - Weiterleitung: ganze Mail oder nur Anhänge (umschaltbar)
+   - Weiterleitungs-Historie (erkennt doppelte Sendungen)
+   - Live-Update der Weiterleitungs-Spalte bei Adressänderung
+   - Suchabbruch jederzeit möglich
+   - Fortschrittsanzeige mit ProgressBar
+   - Logging nach C:\ScriptLog\
+
+ HINWEIS:
+   Benötigt eine lokal installierte und konfigurierte Outlook-Instanz
+   (COM-Automatisierung). Logging erfolgt unter C:\ScriptLog.
+==================================================================================
+#>
+
+#Region ================== VARIABLEN / KONFIGURATION ==================
+# Zentrale Konfiguration - hier bei Bedarf anpassen
+$LogVerzeichnis        = "C:\ScriptLog"                                   # Log-Ablage (Standard)
+$LogDatei              = Join-Path $LogVerzeichnis "Outlook_Mailsuche.log"
+$StandardSuchwort      = "Rechnung"                                       # Vorbelegung Suchfeld
+$StandardWeiterleitung = "empfaenger@firma.de"                            # Vorbelegung Zieladresse
+$UpdateIntervall       = 25                                               # GUI-Update alle X Mails
+$TempAnhangPfad        = Join-Path $env:TEMP "OutlookMailsuche_Anhaenge"  # Temp-Ordner für Anhänge
+$FensterSkalierung     = 0.85                                             # 85 % der Bildschirmgröße
+
+# Globale Sammel-Variable für Treffer (Mail-Objekte referenzieren)
+$Global:GefundeneMails = @{}
+
+# Steuerflag: wird auf $true gesetzt, um eine laufende Suche abzubrechen
+$Global:SucheAbbrechen = $false
+#EndRegion
+
+
+#Region ================== VORBEREITUNG / ASSEMBLIES ==================
+try {
+    # Log-Verzeichnis anlegen, falls nicht vorhanden
+    if (-not (Test-Path -Path $LogVerzeichnis)) {
+        New-Item -Path $LogVerzeichnis -ItemType Directory -Force | Out-Null
+    }
+    # Temp-Ordner für Anhänge anlegen
+    if (-not (Test-Path -Path $TempAnhangPfad)) {
+        New-Item -Path $TempAnhangPfad -ItemType Directory -Force | Out-Null
+    }
+
+    # Windows-Forms-Bibliotheken laden (für GUI)
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+}
+catch {
+    Write-Host "Kritischer Fehler bei der Vorbereitung: $($_.Exception.Message)" -ForegroundColor Red
+    return
+}
+#EndRegion
+
+
+#Region ================== HILFSFUNKTIONEN ==================
+
+<#
+.SYNOPSIS
+    Schreibt einen Eintrag in die Log-Datei unter C:\ScriptLog.
+.PARAMETER Text
+    Der zu protokollierende Text.
+.PARAMETER Level
+    Log-Level: INFO, WARN, ERROR, STATUS.
+#>
+function Write-Log {
+    param (
+        [Parameter(Mandatory = $true)][string] $Text,
+        [ValidateSet("INFO","WARN","ERROR","STATUS")][string] $Level = "INFO"
+    )
+    try {
+        "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$Level] $Text" |
+            Out-File -FilePath $LogDatei -Append -Encoding UTF8
+    }
+    catch {
+        # Logging darf niemals das Script abbrechen
+        Write-Host "Logging fehlgeschlagen: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+<#
+.SYNOPSIS
+    Aktualisiert die Fortschrittsanzeige in der GUI und schreibt einen Log-Eintrag.
+.PARAMETER Statustext
+    Der anzuzeigende Statustext.
+.PARAMETER Prozent
+    Fortschritt in Prozent (0-100).
+#>
+function Update-Status {
+    param (
+        [Parameter(Mandatory = $true)][string] $Statustext,
+        [Parameter(Mandatory = $true)][ValidateRange(0,100)][int] $Prozent
+    )
+    try {
+        $lblStatus.Text    = $Statustext
+        $progressBar.Value = $Prozent
+        [System.Windows.Forms.Application]::DoEvents()   # GUI reaktionsfähig halten
+        Write-Log -Text "$Statustext ($Prozent%)" -Level STATUS
+    }
+    catch {
+        Write-Log -Text "Status-Update fehlgeschlagen: $($_.Exception.Message)" -Level WARN
+    }
+}
+
+<#
+.SYNOPSIS
+    Liefert das aktuell in der Ergebnisliste ausgewählte Original-MailItem
+    (aufgelöst über den im .Tag gespeicherten GUID-Schlüssel).
+#>
+function Get-AusgewaehlteMail {
+    if ($ergebnisListe.SelectedItems.Count -eq 0) { return $null }
+    $key = $ergebnisListe.SelectedItems[0].Tag
+    return $Global:GefundeneMails[$key]
+}
+
+#EndRegion
+
+
+#Region ================== OUTLOOK-VERBINDUNG ==================
+try {
+    Write-Log -Text "Script gestartet. Verbinde mit Outlook..." -Level INFO
+
+    # Outlook-COM-Objekt erzeugen und MAPI-Namespace holen
+    $outlook   = New-Object -ComObject Outlook.Application
+    $namespace = $outlook.GetNamespace("MAPI")
+
+    # Alle verfügbaren Postfächer (Stores) ermitteln
+    $postfaecher = @()
+    foreach ($store in $namespace.Stores) {
+        $postfaecher += $store
+    }
+
+    if ($postfaecher.Count -eq 0) {
+        throw "Es wurden keine Outlook-Postfächer gefunden."
+    }
+    Write-Log -Text "$($postfaecher.Count) Postfach/Postfächer gefunden." -Level INFO
+}
+catch {
+    $msg = "Verbindung zu Outlook fehlgeschlagen: $($_.Exception.Message)"
+    Write-Log -Text $msg -Level ERROR
+    [System.Windows.Forms.MessageBox]::Show($msg,"Fehler",'OK','Error')
+    return
+}
+#EndRegion
+
+
+#Region ================== GUI-AUFBAU (DYNAMISCH, 85% BILDSCHIRM) ==================
+
+# --- Bildschirmgröße ermitteln und Fenster auf 85 % skalieren ---
+$screen      = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$fensterBrt  = [int]($screen.Width  * $FensterSkalierung)
+$fensterHoe  = [int]($screen.Height * $FensterSkalierung)
+
+# --- Hauptfenster ---
+$form = New-Object System.Windows.Forms.Form
+$form.Text            = "Outlook-Mailsuche"
+$form.Size            = New-Object System.Drawing.Size($fensterBrt, $fensterHoe)
+$form.MinimumSize     = New-Object System.Drawing.Size(760, 640)   # sinnvolle Untergrenze
+$form.StartPosition   = "CenterScreen"
+$form.FormBorderStyle = "Sizable"     # Fenster darf frei skaliert werden
+$form.MaximizeBox     = $true
+
+# --- Label + Textbox: Suchwort (oben, feste Position) ---
+$lblSuchwort = New-Object System.Windows.Forms.Label
+$lblSuchwort.Location = New-Object System.Drawing.Point(15, 15)
+$lblSuchwort.Size     = New-Object System.Drawing.Size(120, 20)
+$lblSuchwort.Text     = "Suchwort:"
+$form.Controls.Add($lblSuchwort)
+
+$txtSuchwort = New-Object System.Windows.Forms.TextBox
+$txtSuchwort.Location = New-Object System.Drawing.Point(140, 13)
+$txtSuchwort.Size     = New-Object System.Drawing.Size(200, 20)
+$txtSuchwort.Text     = $StandardSuchwort
+$form.Controls.Add($txtSuchwort)
+
+# --- Checkbox: nur Mails mit Anhang ---
+$chkNurAnhang = New-Object System.Windows.Forms.CheckBox
+$chkNurAnhang.Location = New-Object System.Drawing.Point(360, 13)
+$chkNurAnhang.Size     = New-Object System.Drawing.Size(200, 20)
+$chkNurAnhang.Text     = "Nur Mails mit Anhang"
+$chkNurAnhang.Checked  = $true
+$form.Controls.Add($chkNurAnhang)
+
+# --- Datumsbereich: von / bis ---
+$lblVon = New-Object System.Windows.Forms.Label
+$lblVon.Location = New-Object System.Drawing.Point(15, 48)
+$lblVon.Size     = New-Object System.Drawing.Size(120, 20)
+$lblVon.Text     = "Datum von:"
+$form.Controls.Add($lblVon)
+
+$dtpVon = New-Object System.Windows.Forms.DateTimePicker
+$dtpVon.Location = New-Object System.Drawing.Point(140, 46)
+$dtpVon.Size     = New-Object System.Drawing.Size(200, 20)
+$dtpVon.Format   = "Short"
+$dtpVon.Value    = (Get-Date).AddMonths(-1)          # Vorbelegung: letzter Monat
+$form.Controls.Add($dtpVon)
+
+$lblBis = New-Object System.Windows.Forms.Label
+$lblBis.Location = New-Object System.Drawing.Point(360, 48)
+$lblBis.Size     = New-Object System.Drawing.Size(70, 20)
+$lblBis.Text     = "Datum bis:"
+$form.Controls.Add($lblBis)
+
+$dtpBis = New-Object System.Windows.Forms.DateTimePicker
+$dtpBis.Location = New-Object System.Drawing.Point(435, 46)
+$dtpBis.Size     = New-Object System.Drawing.Size(200, 20)
+$dtpBis.Format   = "Short"
+$dtpBis.Value    = (Get-Date)                        # Vorbelegung: heute
+$form.Controls.Add($dtpBis)
+
+# --- Label + Liste: Postfach-Auswahl ---
+$lblPostfach = New-Object System.Windows.Forms.Label
+$lblPostfach.Location = New-Object System.Drawing.Point(15, 82)
+$lblPostfach.Size     = New-Object System.Drawing.Size(300, 20)
+$lblPostfach.Text     = "Postfächer (Mehrfachauswahl möglich):"
+$form.Controls.Add($lblPostfach)
+
+$lstPostfaecher = New-Object System.Windows.Forms.CheckedListBox
+$lstPostfaecher.Location    = New-Object System.Drawing.Point(15, 105)
+$lstPostfaecher.Size        = New-Object System.Drawing.Size(320, 90)
+$lstPostfaecher.CheckOnClick = $true
+foreach ($pf in $postfaecher) {
+    [void]$lstPostfaecher.Items.Add($pf.DisplayName)
+}
+$form.Controls.Add($lstPostfaecher)
+
+# --- Checkbox: alle Postfächer durchsuchen ---
+$chkAllePostfaecher = New-Object System.Windows.Forms.CheckBox
+$chkAllePostfaecher.Location = New-Object System.Drawing.Point(345, 105)
+$chkAllePostfaecher.Size     = New-Object System.Drawing.Size(250, 20)
+$chkAllePostfaecher.Text     = "Alle Postfächer durchsuchen"
+$form.Controls.Add($chkAllePostfaecher)
+
+# Alle Postfächer-Checkbox aktiviert/deaktiviert die Einzelliste
+$chkAllePostfaecher.Add_CheckedChanged({
+    $lstPostfaecher.Enabled = -not $chkAllePostfaecher.Checked
+})
+
+# --- Weiterleitungs-Adresse ---
+$lblZiel = New-Object System.Windows.Forms.Label
+$lblZiel.Location = New-Object System.Drawing.Point(345, 135)
+$lblZiel.Size     = New-Object System.Drawing.Size(250, 20)
+$lblZiel.Text     = "Weiterleiten an (E-Mail):"
+$form.Controls.Add($lblZiel)
+
+$txtZiel = New-Object System.Windows.Forms.TextBox
+$txtZiel.Location = New-Object System.Drawing.Point(345, 158)
+$txtZiel.Size     = New-Object System.Drawing.Size(320, 20)
+$txtZiel.Text     = $StandardWeiterleitung
+$form.Controls.Add($txtZiel)
+
+# --- Bei Änderung der Ziel-Adresse: Weiterleitungs-Spalte aktualisieren ---
+$txtZiel.Add_TextChanged({
+    $ziel = $txtZiel.Text.Trim()
+    $histDatei = Join-Path $LogVerzeichnis "Outlook_Weiterleitungen.json"
+    $hist = @()
+    try {
+        if (Test-Path $histDatei) { $hist = Get-Content -Path $histDatei -Raw -Encoding UTF8 | ConvertFrom-Json }
+    } catch { }
+    foreach ($item in $ergebnisListe.Items) {
+        $key = $item.Tag
+        $mail = $Global:GefundeneMails[$key]
+        if (-not $mail) { continue }
+        $weg = ""
+        if ($mail.EntryID) {
+            foreach ($h in $hist) {
+                if ($h.MailId -eq $mail.EntryID -and $h.Empfaenger -eq $ziel) {
+                    $weg = "Ja"
+                    break
+                }
+            }
+        }
+        if ($item.SubItems.Count -ge 5) { $item.SubItems[4].Text = $weg }
+    }
+})
+
+# --- Such-Button ---
+$btnSuchen = New-Object System.Windows.Forms.Button
+$btnSuchen.Location  = New-Object System.Drawing.Point(345, 185)
+$btnSuchen.Size      = New-Object System.Drawing.Size(150, 30)
+$btnSuchen.Text      = "Suche starten"
+$btnSuchen.BackColor = [System.Drawing.Color]::LightSteelBlue
+$form.Controls.Add($btnSuchen)
+
+# --- Abbrechen-Button (nur während laufender Suche aktiv) ---
+$btnAbbrechen = New-Object System.Windows.Forms.Button
+$btnAbbrechen.Location  = New-Object System.Drawing.Point(505, 185)
+$btnAbbrechen.Size      = New-Object System.Drawing.Size(160, 30)
+$btnAbbrechen.Text      = "Suche abbrechen"
+$btnAbbrechen.BackColor = [System.Drawing.Color]::LightSalmon
+$btnAbbrechen.Enabled   = $false
+$form.Controls.Add($btnAbbrechen)
+
+# --- Ergebnisliste (ListView) - wächst mit dem Fenster ---
+$lblErgebnis = New-Object System.Windows.Forms.Label
+$lblErgebnis.Location = New-Object System.Drawing.Point(15, 225)
+$lblErgebnis.Size     = New-Object System.Drawing.Size(300, 20)
+$lblErgebnis.Text     = "Ergebnisse:"
+$form.Controls.Add($lblErgebnis)
+
+$ergebnisListe = New-Object System.Windows.Forms.ListView
+$ergebnisListe.Location      = New-Object System.Drawing.Point(15, 248)
+$ergebnisListe.Size          = New-Object System.Drawing.Size(($fensterBrt - 55), ($fensterHoe - 560))
+$ergebnisListe.View          = 'Details'
+$ergebnisListe.FullRowSelect = $true
+$ergebnisListe.GridLines     = $true
+# Anker: oben+links+rechts fixiert, Höhe wächst mit -> Top,Bottom,Left,Right
+$ergebnisListe.Anchor        = 'Top','Bottom','Left','Right'
+[void]$ergebnisListe.Columns.Add("Datum", 120)
+[void]$ergebnisListe.Columns.Add("Absender", 200)
+[void]$ergebnisListe.Columns.Add("Betreff", 320)
+[void]$ergebnisListe.Columns.Add("Anhang", 70)
+[void]$ergebnisListe.Columns.Add("Weiterl.", 80)
+$form.Controls.Add($ergebnisListe)
+
+# --- Aktions-Buttons unter der Liste (am unteren Rand verankert) ---
+$btnInhalt = New-Object System.Windows.Forms.Button
+$btnInhalt.Location = New-Object System.Drawing.Point(15, ($fensterHoe - 300))
+$btnInhalt.Size     = New-Object System.Drawing.Size(150, 28)
+$btnInhalt.Text     = "Inhalt anzeigen"
+$btnInhalt.Anchor   = 'Bottom','Left'
+$form.Controls.Add($btnInhalt)
+
+$btnAnhang = New-Object System.Windows.Forms.Button
+$btnAnhang.Location = New-Object System.Drawing.Point(175, ($fensterHoe - 300))
+$btnAnhang.Size     = New-Object System.Drawing.Size(150, 28)
+$btnAnhang.Text     = "Anhang öffnen"
+$btnAnhang.Anchor   = 'Bottom','Left'
+$form.Controls.Add($btnAnhang)
+
+$btnWeiterleiten = New-Object System.Windows.Forms.Button
+$btnWeiterleiten.Location  = New-Object System.Drawing.Point(335, ($fensterHoe - 300))
+$btnWeiterleiten.Size      = New-Object System.Drawing.Size(180, 28)
+$btnWeiterleiten.Text      = "Ausgewählte weiterleiten"
+$btnWeiterleiten.BackColor = [System.Drawing.Color]::PaleGreen
+$btnWeiterleiten.Anchor    = 'Bottom','Left'
+$form.Controls.Add($btnWeiterleiten)
+
+# --- Checkbox: Nur Anhang weiterleiten (neben dem Weiterleiten-Button) ---
+$chkNurAnhangWeiterleiten = New-Object System.Windows.Forms.CheckBox
+$chkNurAnhangWeiterleiten.Location = New-Object System.Drawing.Point(520, ($fensterHoe - 298))
+$chkNurAnhangWeiterleiten.Size     = New-Object System.Drawing.Size(170, 22)
+$chkNurAnhangWeiterleiten.Text     = "Nur Anhang weiterleiten"
+$chkNurAnhangWeiterleiten.Checked  = $false
+$chkNurAnhangWeiterleiten.Anchor   = 'Bottom','Left'
+$form.Controls.Add($chkNurAnhangWeiterleiten)
+
+# --- Fortschrittsanzeige (unten verankert) ---
+$lblStatus = New-Object System.Windows.Forms.Label
+$lblStatus.Location  = New-Object System.Drawing.Point(15, ($fensterHoe - 265))
+$lblStatus.Size      = New-Object System.Drawing.Size(($fensterBrt - 55), 20)
+$lblStatus.Text      = "Bereit."
+$lblStatus.ForeColor = [System.Drawing.Color]::DarkBlue
+$lblStatus.Anchor    = 'Bottom','Left','Right'
+$form.Controls.Add($lblStatus)
+
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Location = New-Object System.Drawing.Point(15, ($fensterHoe - 243))
+$progressBar.Size     = New-Object System.Drawing.Size(($fensterBrt - 55), 22)
+$progressBar.Minimum  = 0
+$progressBar.Maximum  = 100
+$progressBar.Style    = 'Continuous'
+$progressBar.Anchor   = 'Bottom','Left','Right'
+$form.Controls.Add($progressBar)
+
+# --- Vorschau-Textbox (Mailinhalt) - links, unten verankert ---
+$txtVorschau = New-Object System.Windows.Forms.TextBox
+$txtVorschau.Location   = New-Object System.Drawing.Point(15, ($fensterHoe - 210))
+$txtVorschau.Size       = New-Object System.Drawing.Size(($fensterBrt - 245), 150)
+$txtVorschau.Multiline  = $true
+$txtVorschau.ScrollBars = 'Vertical'
+$txtVorschau.ReadOnly   = $true
+$txtVorschau.Anchor     = 'Bottom','Left','Right'
+$form.Controls.Add($txtVorschau)
+
+# --- Label + Liste: Anhänge (rechts neben der Vorschau) ---
+$lblAnhaenge = New-Object System.Windows.Forms.Label
+$lblAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 230))
+$lblAnhaenge.Size     = New-Object System.Drawing.Size(180, 18)
+$lblAnhaenge.Text     = "Anhänge:"
+$lblAnhaenge.Anchor   = 'Bottom','Right'
+$form.Controls.Add($lblAnhaenge)
+
+$lstAnhaenge = New-Object System.Windows.Forms.ListBox
+$lstAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 210))
+$lstAnhaenge.Size     = New-Object System.Drawing.Size(180, 150)
+$lstAnhaenge.Anchor   = 'Bottom','Right'
+$form.Controls.Add($lstAnhaenge)
+
+#EndRegion
+
+
+#Region ================== SUCHLOGIK ==================
+$btnSuchen.Add_Click({
+    try {
+        # --- Eingaben auslesen ---
+        $suchwort  = $txtSuchwort.Text.Trim()
+        $datumVon  = $dtpVon.Value.Date
+        $datumBis  = $dtpBis.Value.Date.AddDays(1).AddSeconds(-1)   # bis Tagesende
+        $nurAnhang = $chkNurAnhang.Checked
+
+        if ([string]::IsNullOrWhiteSpace($suchwort)) {
+            [System.Windows.Forms.MessageBox]::Show("Bitte ein Suchwort eingeben.","Hinweis",'OK','Warning')
+            return
+        }
+        if ($datumVon -gt $datumBis) {
+            [System.Windows.Forms.MessageBox]::Show("Das Start-Datum liegt nach dem End-Datum.","Hinweis",'OK','Warning')
+            return
+        }
+
+        # --- Zu durchsuchende Postfächer bestimmen ---
+        if ($chkAllePostfaecher.Checked) {
+            $zuDurchsuchen = $postfaecher
+        }
+        else {
+            $zuDurchsuchen = @()
+            foreach ($idx in $lstPostfaecher.CheckedIndices) {
+                $zuDurchsuchen += $postfaecher[$idx]
+            }
+        }
+
+        if ($zuDurchsuchen.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("Bitte mindestens ein Postfach auswählen (oder 'Alle').","Hinweis",'OK','Warning')
+            return
+        }
+
+        # --- Vorbereitung ---
+        $ergebnisListe.Items.Clear()
+        $Global:GefundeneMails.Clear()
+        $txtVorschau.Clear()
+        $lstAnhaenge.Items.Clear()
+
+        # Abbruch-Flag zuruecksetzen und Buttons umschalten
+        $Global:SucheAbbrechen = $false
+        $btnSuchen.Enabled     = $false     # Doppelklick verhindern
+        $btnAbbrechen.Enabled  = $true       # Abbrechen freigeben
+
+        # Weiterleitungs-Historie für Prüfung laden (einmalig)
+        $weiterleitungsHistorie = @()
+        $weiterleitungsDatei = Join-Path $LogVerzeichnis "Outlook_Weiterleitungen.json"
+        try {
+            if (Test-Path $weiterleitungsDatei) {
+                $weiterleitungsHistorie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
+            }
+        } catch { Write-Log -Text "Fehler beim Laden der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN }
+
+        Update-Status -Statustext "Suche wird gestartet..." -Prozent 0
+        Write-Log -Text "Suche gestartet. Wort='$suchwort', Von=$datumVon, Bis=$datumBis, NurAnhang=$nurAnhang" -Level INFO
+
+        $anzahlPostfaecher = $zuDurchsuchen.Count
+        $postfachIndex     = 0
+        $trefferGesamt     = 0
+
+        foreach ($postfach in $zuDurchsuchen) {
+
+            # --- Abbruch auf Postfach-Ebene pruefen ---
+            if ($Global:SucheAbbrechen) { break }
+            $postfachIndex++
+
+            try {
+                # Posteingang des jeweiligen Postfachs holen
+                $rootFolder = $postfach.GetRootFolder()
+                $mails      = $rootFolder.Folders | Where-Object { $_.Name -match 'Posteingang|Inbox' } | Select-Object -First 1
+
+                if (-not $mails) {
+                    # Fallback: Root-Ordner selbst verwenden
+                    $items = $rootFolder.Items
+                }
+                else {
+                    $items = $mails.Items
+                }
+
+                # Nach Empfangszeit sortieren (Performance beim Durchlauf)
+                $items.Sort("[ReceivedTime]", $true)
+
+                $gesamtMails = $items.Count
+                $mailIndex   = 0
+
+                Update-Status -Statustext "Postfach $postfachIndex von $anzahlPostfaecher : '$($postfach.DisplayName)' wird durchsucht..." `
+                              -Prozent ([int](($postfachIndex - 1) / $anzahlPostfaecher * 100))
+
+                foreach ($mail in $items) {
+
+                    # --- Abbruch auf Mail-Ebene pruefen ---
+                    if ($Global:SucheAbbrechen) { break }
+                    [System.Windows.Forms.Application]::DoEvents()   # Abbrechen-Klick verarbeiten
+
+                    $mailIndex++
+
+                    # --- Fortschritt regelmäßig aktualisieren ---
+                    if (($mailIndex % $UpdateIntervall) -eq 0 -or $mailIndex -eq $gesamtMails) {
+                        $prozentGesamt = [int]( ( ($postfachIndex - 1) + ($mailIndex / [math]::Max($gesamtMails,1)) ) / $anzahlPostfaecher * 100 )
+                        if ($prozentGesamt -gt 100) { $prozentGesamt = 100 }
+                        Update-Status -Statustext ("Postfach '{0}' ({1}/{2}) - Mail {3} von {4} - Treffer: {5}" -f `
+                                      $postfach.DisplayName, $postfachIndex, $anzahlPostfaecher, $mailIndex, $gesamtMails, $trefferGesamt) `
+                                      -Prozent $prozentGesamt
+                    }
+
+                    try {
+                        # Nur echte E-Mail-Objekte prüfen (MailItem = Class 43)
+                        if ($mail.Class -ne 43) { continue }
+
+                        # --- Datumsfilter ---
+                        $empfangen = $mail.ReceivedTime
+                        if ($empfangen -lt $datumVon -or $empfangen -gt $datumBis) { continue }
+
+                        # --- Anhang-Filter ---
+                        $hatAnhang = ($mail.Attachments.Count -gt 0)
+                        if ($nurAnhang -and -not $hatAnhang) { continue }
+
+                        # --- Suchwort-Filter (Betreff ODER Text) ---
+                        $betreff = if ($mail.Subject) { $mail.Subject } else { "" }
+                        $body    = if ($mail.Body)    { $mail.Body }    else { "" }
+                        if ($betreff -notmatch [regex]::Escape($suchwort) -and
+                            $body    -notmatch [regex]::Escape($suchwort)) { continue }
+
+                        # --- Prüfen ob bereits weitergeleitet ---
+                        $bereitsWeg = ""
+                        $zielAdr = $txtZiel.Text.Trim()
+                        if ($zielAdr -match '^[^@\s]+@[^@\s]+\.[^@\s]+$' -and $mail.EntryID) {
+                            foreach ($eh in $weiterleitungsHistorie) {
+                                if ($eh.MailId -eq $mail.EntryID -and $eh.Empfaenger -eq $zielAdr) {
+                                    $bereitsWeg = "Ja"
+                                    break
+                                }
+                            }
+                        }
+
+                        # --- Treffer in Liste eintragen ---
+                        $item = New-Object System.Windows.Forms.ListViewItem($empfangen.ToString("dd.MM.yyyy HH:mm"))
+                        [void]$item.SubItems.Add([string]$mail.SenderName)
+                        [void]$item.SubItems.Add([string]$betreff)
+                        [void]$item.SubItems.Add($(if ($hatAnhang) { "Ja" } else { "Nein" }))
+                        [void]$item.SubItems.Add($bereitsWeg)
+
+                        # Eindeutigen Schlüssel vergeben und Mail-Objekt merken
+                        $key = [Guid]::NewGuid().ToString()
+                        $item.Tag = $key
+                        $Global:GefundeneMails[$key] = $mail
+
+                        [void]$ergebnisListe.Items.Add($item)
+                        $trefferGesamt++
+                    }
+                    catch {
+                        Write-Log -Text "Fehler beim Prüfen einer Mail: $($_.Exception.Message)" -Level WARN
+                        continue
+                    }
+                }
+            }
+            catch {
+                Write-Log -Text "Fehler beim Zugriff auf Postfach '$($postfach.DisplayName)': $($_.Exception.Message)" -Level ERROR
+                continue
+            }
+        }
+
+        # --- Abschlussmeldung je nach Abbruch-Status ---
+        if ($Global:SucheAbbrechen) {
+            Update-Status -Statustext "Suche abgebrochen. $trefferGesamt Treffer bis zum Abbruch." -Prozent 100
+            Write-Log -Text "Suche abgebrochen nach $trefferGesamt Treffern." -Level WARN
+        }
+        else {
+            Update-Status -Statustext "Suche abgeschlossen. $trefferGesamt Treffer gefunden." -Prozent 100
+            Write-Log -Text "Suche abgeschlossen. $trefferGesamt Treffer." -Level INFO
+        }
+    }
+    catch {
+        $fehlerText = "Fehler während der Suche: $($_.Exception.Message)"
+        Update-Status -Statustext $fehlerText -Prozent 0
+        Write-Log -Text $fehlerText -Level ERROR
+        [System.Windows.Forms.MessageBox]::Show($fehlerText,"Fehler",'OK','Error')
+    }
+    finally {
+        # Buttons IMMER zuruecksetzen - auch bei Fehler oder Abbruch
+        $btnSuchen.Enabled     = $true
+        $btnAbbrechen.Enabled  = $false
+        $Global:SucheAbbrechen = $false
+    }
+})
+#EndRegion
+
+
+#Region ================== ABBRECHEN ==================
+$btnAbbrechen.Add_Click({
+    $Global:SucheAbbrechen = $true
+    Update-Status -Statustext "Abbruch angefordert - bitte warten..." -Prozent $progressBar.Value
+    Write-Log -Text "Suche wurde vom Benutzer abgebrochen." -Level WARN
+})
+#EndRegion
+
+
+#Region ================== VORSCHAU / ANHANG / WEITERLEITEN ==================
+
+# --- Vorschau + Anhangsliste automatisch bei Auswahl anzeigen ---
+$aktionVorschau = {
+    try {
+        $mail = Get-AusgewaehlteMail
+        # Felder immer erst leeren, damit keine alten Daten stehen bleiben
+        $txtVorschau.Clear()
+        $lstAnhaenge.Items.Clear()
+
+        if (-not $mail) { return }
+
+        # --- Mailinhalt in die Vorschau schreiben ---
+        $txtVorschau.Text = "Von: $($mail.SenderName)`r`n" +
+                            "Betreff: $($mail.Subject)`r`n" +
+                            "Empfangen: $($mail.ReceivedTime)`r`n" +
+                            "--------------------------------------------------`r`n" +
+                            "$($mail.Body)"
+
+        # --- Anhangsnamen rechts auflisten ---
+        if ($mail.Attachments.Count -gt 0) {
+            foreach ($att in $mail.Attachments) {
+                [void]$lstAnhaenge.Items.Add($att.FileName)
+            }
+        }
+        else {
+            [void]$lstAnhaenge.Items.Add("(keine Anhänge)")
+        }
+
+        Write-Log -Text "Vorschau geladen: '$($mail.Subject)'" -Level INFO
+    }
+    catch {
+        Write-Log -Text "Fehler bei der Vorschau: $($_.Exception.Message)" -Level ERROR
+    }
+}
+
+# Vorschau sofort bei Auswahl (Klick / Pfeiltasten) - und per Button verfügbar
+$ergebnisListe.Add_SelectedIndexChanged($aktionVorschau)
+$btnInhalt.Add_Click($aktionVorschau)
+
+# --- Anhang öffnen ---
+# Öffnet den in der Anhangsliste markierten Anhang; ist keiner markiert, werden alle geöffnet.
+$btnAnhang.Add_Click({
+    try {
+        $mail = Get-AusgewaehlteMail
+        if (-not $mail) {
+            [System.Windows.Forms.MessageBox]::Show("Bitte zuerst eine Mail auswählen.","Hinweis",'OK','Information')
+            return
+        }
+        if ($mail.Attachments.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("Diese Mail hat keinen Anhang.","Hinweis",'OK','Information')
+            return
+        }
+
+        # Falls in der Anhangsliste ein konkreter Anhang markiert ist, nur diesen öffnen
+        $ausgewaehlterName = $null
+        if ($lstAnhaenge.SelectedItem -and $lstAnhaenge.SelectedItem -ne "(keine Anhänge)") {
+            $ausgewaehlterName = [string]$lstAnhaenge.SelectedItem
+        }
+
+        foreach ($att in $mail.Attachments) {
+            if ($ausgewaehlterName -and $att.FileName -ne $ausgewaehlterName) { continue }
+
+            $zielPfad = Join-Path $TempAnhangPfad $att.FileName
+            $att.SaveAsFile($zielPfad)
+            Start-Process -FilePath $zielPfad
+            Write-Log -Text "Anhang geöffnet: $($att.FileName)" -Level INFO
+        }
+    }
+    catch {
+        Write-Log -Text "Fehler beim Öffnen des Anhangs: $($_.Exception.Message)" -Level ERROR
+        [System.Windows.Forms.MessageBox]::Show("Anhang konnte nicht geöffnet werden: $($_.Exception.Message)","Fehler",'OK','Error')
+    }
+})
+
+# --- Doppelklick in der Anhangsliste öffnet direkt den markierten Anhang ---
+$lstAnhaenge.Add_DoubleClick({ $btnAnhang.PerformClick() })
+
+# --- Weiterleiten ---
+$btnWeiterleiten.Add_Click({
+    try {
+        $zielAdresse = $txtZiel.Text.Trim()
+        if ([string]::IsNullOrWhiteSpace($zielAdresse)) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Bitte zuerst eine Ziel-E-Mail-Adresse eingeben.",
+                "Hinweis", 'OK', 'Warning')
+            return
+        }
+
+        # --- E-Mail-Format grob validieren ---
+        if ($zielAdresse -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Die Adresse '$zielAdresse' scheint ungueltig zu sein.",
+                "Ungueltige Adresse", 'OK', 'Warning')
+            return
+        }
+
+        # --- Pruefen, ob eine Mail in der Liste ausgewaehlt ist ---
+        if ($null -eq $ergebnisListe.SelectedItems -or $ergebnisListe.SelectedItems.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Bitte zuerst eine Mail in der Liste auswaehlen.",
+                "Hinweis", 'OK', 'Information')
+            return
+        }
+
+        # --- Original-MailItem über den GUID-Schlüssel im Dictionary holen (FIX) ---
+        $ausgewaehlterEintrag = $ergebnisListe.SelectedItems[0]
+        $key                  = $ausgewaehlterEintrag.Tag          # Tag = GUID-Schlüssel
+        $originalMail         = $Global:GefundeneMails[$key]        # <-- echte Mail holen
+
+        if ($null -eq $originalMail) {
+            throw "Zum ausgewaehlten Listeneintrag konnte keine Original-Mail gefunden werden."
+        }
+
+        # --- Prüfen ob diese Mail bereits an die Zieladresse weitergeleitet wurde ---
+        $weiterleitungsDatei = Join-Path $LogVerzeichnis "Outlook_Weiterleitungen.json"
+        $bereitsWeitergeleitet = $false
+        try {
+            $mailId = $originalMail.EntryID
+            if (-not [string]::IsNullOrWhiteSpace($mailId) -and (Test-Path $weiterleitungsDatei)) {
+                $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
+                foreach ($eintrag in $historie) {
+                    if ($eintrag.MailId -eq $mailId -and $eintrag.Empfaenger -eq $zielAdresse) {
+                        $bereitsWeitergeleitet = $true
+                        break
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Log -Text "Fehler beim Prüfen der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN
+        }
+
+        if ($bereitsWeitergeleitet) {
+            $antwort = [System.Windows.Forms.MessageBox]::Show(
+                "Diese Mail wurde bereits an '$zielAdresse' weitergeleitet (am $($eintrag.Datum)).`n`nTrotzdem erneut senden?",
+                "Bereits weitergeleitet", 'YesNo', 'Warning')
+            if ($antwort -eq 'No') { return }
+        }
+
+        # --- Weiterleitung: entweder ganze Mail oder nur Anhänge ---
+        if ($chkNurAnhangWeiterleiten.Checked) {
+            # --- Nur Anhänge weiterleiten ---
+            if ($originalMail.Attachments.Count -eq 0) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Diese Mail hat keine Anhänge zum Weiterleiten.","Hinweis",'OK','Information')
+                return
+            }
+
+            # Temporäres Verzeichnis für Anhänge
+            $tmpDir = Join-Path $env:TEMP "OutlookMailsuche_Weiterleitung"
+            if (-not (Test-Path $tmpDir)) {
+                New-Item -Path $tmpDir -ItemType Directory -Force | Out-Null
+            }
+
+            # Alle Anhänge speichern
+            $savedFiles = @()
+            foreach ($att in $originalMail.Attachments) {
+                $fileName = $att.FileName -replace '[<>:"/\\|?*]', '_'
+                $filePath = Join-Path $tmpDir $fileName
+                $counter = 1
+                $baseName = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+                $extension = [System.IO.Path]::GetExtension($fileName)
+                while (Test-Path $filePath) {
+                    $fileName = "$baseName($counter)$extension"
+                    $filePath = Join-Path $tmpDir $fileName
+                    $counter++
+                }
+                $att.SaveAsFile($filePath)
+                $savedFiles += $filePath
+            }
+
+            # Neue Mail mit Anhängen erstellen und senden
+            $newMail = $outlook.CreateItem(0) # olMailItem
+            $newMail.Subject = "Weitergeleitete Anhänge: $($originalMail.Subject)"
+            $newMail.Body = "Anhänge aus der Mail '$($originalMail.Subject)' vom $($originalMail.ReceivedTime.ToString('dd.MM.yyyy')) werden hiermit weitergeleitet."
+            foreach ($file in $savedFiles) {
+                $newMail.Attachments.Add($file) | Out-Null
+            }
+            $newMail.Recipients.Add($zielAdresse) | Out-Null
+            $newMail.Recipients.ResolveAll() | Out-Null
+            $newMail.Send()
+
+            # Temp-Dateien aufräumen
+            foreach ($file in $savedFiles) {
+                Remove-Item $file -Force -ErrorAction SilentlyContinue
+            }
+
+            # Weiterleitung in Historie vermerken
+            try {
+                $eintrag = @{ MailId = $originalMail.EntryID; Empfaenger = $zielAdresse; Datum = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") }
+                if (Test-Path $weiterleitungsDatei) {
+                    $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
+                } else { $historie = @() }
+                $historie += $eintrag
+                $historie | ConvertTo-Json -Depth 1 | Out-File -FilePath $weiterleitungsDatei -Encoding UTF8
+            } catch { Write-Log -Text "Fehler beim Speichern der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN }
+
+            Write-Log -Text "Anhänge aus '$($originalMail.Subject)' ($($savedFiles.Count) Datei(en)) an '$zielAdresse' weitergeleitet." -Level INFO
+            $lblStatus.Text = "$($savedFiles.Count) Anhang/Anhänge an '$zielAdresse' weitergeleitet."
+            [System.Windows.Forms.MessageBox]::Show(
+                "$($savedFiles.Count) Anhang/Anhänge wurde(n) an $zielAdresse weitergeleitet.",
+                "Erfolg",'OK','Information')
+        }
+        else {
+            # --- Ganze Mail weiterleiten (bisheriges Verhalten) ---
+            $weiterleitung = $originalMail.Forward()
+            $weiterleitung.Recipients.Add($zielAdresse) | Out-Null
+
+            # Empfaenger aufloesen (nur Warnung, kein Abbruch)
+            if (-not $weiterleitung.Recipients.ResolveAll()) {
+                Write-Log -Text "Empfaenger '$zielAdresse' nicht vollstaendig aufloesbar - wird trotzdem versendet." -Level WARN
+            }
+
+            $weiterleitung.Send()
+
+            # Weiterleitung in Historie vermerken
+            try {
+                $eintrag = @{ MailId = $originalMail.EntryID; Empfaenger = $zielAdresse; Datum = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") }
+                if (Test-Path $weiterleitungsDatei) {
+                    $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
+                } else { $historie = @() }
+                $historie += $eintrag
+                $historie | ConvertTo-Json -Depth 1 | Out-File -FilePath $weiterleitungsDatei -Encoding UTF8
+            } catch { Write-Log -Text "Fehler beim Speichern der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN }
+
+            Write-Log -Text "Mail '$($originalMail.Subject)' weitergeleitet an '$zielAdresse'." -Level INFO
+            $lblStatus.Text = "Mail erfolgreich an '$zielAdresse' weitergeleitet."
+            [System.Windows.Forms.MessageBox]::Show(
+                "Die Mail wurde erfolgreich an '$zielAdresse' weitergeleitet.",
+                "Erfolg",'OK','Information')
+        }
+    }
+    catch {
+        # --- Zentrale Fehlerbehandlung mit Logging ---
+        $fehlerText = "Fehler beim Weiterleiten: $($_.Exception.Message)"
+        Write-Log -Text $fehlerText -Level ERROR
+        [System.Windows.Forms.MessageBox]::Show($fehlerText, "Fehler", 'OK', 'Error')
+    }
+})
+
+#EndRegion
+
+
+#Region ================== START ==================
+try {
+    [void]$form.ShowDialog()
+}
+finally {
+    # COM-Objekte sauber freigeben
+    if ($outlook) {
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null
+    }
+    Write-Log -Text "Script beendet." -Level INFO
+}
+#EndRegion
