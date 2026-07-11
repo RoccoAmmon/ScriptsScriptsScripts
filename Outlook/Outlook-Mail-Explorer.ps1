@@ -824,7 +824,6 @@ $btnWeiterleiten.Add_Click({
         }
 
         $erfolgreich = 0
-        $historieNeu = @()
 
         :weiterleitung foreach ($originalMail in $zuSenden) {
             try {
@@ -881,28 +880,29 @@ $btnWeiterleiten.Add_Click({
                     Write-Log -Text "Mail '$($originalMail.Subject)' weitergeleitet an '$zielAdresse'." -Level INFO
                 }
 
-                # Historie-Eintrag merken (spaeter gemeinsam speichern)
-                $historieNeu += @{
+                # --- Historie sofort speichern (nach jeder Mail, fuer Ausfallsicherheit) ---
+                $eintrag = @{
                     MailId     = $originalMail.EntryID
                     Empfaenger = $zielAdresse
                     Datum      = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
                 }
+                try {
+                    $historie = @()
+                    if (Test-Path $weiterleitungsDatei) {
+                        $historie = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
+                    }
+                    $historie += $eintrag
+                    $historie | ConvertTo-Json -Depth 1 | Out-File -FilePath $weiterleitungsDatei -Encoding UTF8
+                } catch {
+                    Write-Log -Text "Fehler beim Speichern der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN
+                }
+
                 $erfolgreich++
             }
             catch {
                 Write-Log -Text "Fehler beim Weiterleiten von '$($originalMail.Subject)': $($_.Exception.Message)" -Level ERROR
             }
         }
-
-        # --- Alle neuen Historie-Eintraege auf einmal speichern ---
-        try {
-            $historieVorhanden = @()
-            if (Test-Path $weiterleitungsDatei) {
-                $historieVorhanden = Get-Content -Path $weiterleitungsDatei -Raw -Encoding UTF8 | ConvertFrom-Json
-            }
-            $historieVorhanden += $historieNeu
-            $historieVorhanden | ConvertTo-Json -Depth 1 | Out-File -FilePath $weiterleitungsDatei -Encoding UTF8
-        } catch { Write-Log -Text "Fehler beim Speichern der Weiterleitungs-Historie: $($_.Exception.Message)" -Level WARN }
 
         # --- Zusammenfassung ---
         $lblStatus.Text = "$erfolgreich von $($zuSenden.Count) Mail(s) an '$zielAdresse' weitergeleitet."
