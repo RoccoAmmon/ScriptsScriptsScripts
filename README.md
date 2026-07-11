@@ -18,6 +18,9 @@
 
 # Citrix PVS Target Device optimieren (als Administrator)
 .\Citrix\Optimierung_Citrix_PVS.ps1
+
+# Outlook-Mailsuche starten (WinForms-GUI)
+.\Outlook\Outlook-Mail-Explorer.ps1
 ```
 
 ---
@@ -28,9 +31,14 @@
 
 | Skript | Beschreibung |
 |--------|-------------|
-| [`Outlook-Mail-Explorer.ps1`](./Outlook/Outlook-Mail-Explorer.ps1) | 📧 **Outlook-Mail-Explorer mit WinForms-GUI v1.2** – Durchsucht ein oder mehrere Postfächer nach Mails mit Suchwort, Datumsbereich und Anhang-Filter. **Sortierbare Ergebnisspalten** (Klick auf Kopf), **Mehrfachauswahl** (Strg+Klick) für Sammel-Weiterleitung, **Postfach-Spalte**. Ergebnisliste mit **Weiterleitungs-Status** (erkennt doppelte Sendungen). **Vorschau** des Mail-Inhalts per Klick, **Anhänge öffnen/speichern**, **Weiterleitung** ganzer Mails oder nur der Anhänge (umschaltbar). **PDF-Filter** für reine PDF-Weiterleitung. **Navigations-Buttons** (▲/▼) zum Durchblättern. Live-Update der Weiterleitungs-Spalte bei Adressänderung. Suchabbruch, Fortschrittsanzeige, Logging. 📖 [Doku →](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/Outlook-Suche) |
 | [`System-Status-Application-Fehler-Report.ps1`](./Citrix/System-Status-Application-Fehler-Report.ps1) | Erweiterter System-Status-Report – sammelt **Application Error/Hang/Popup**, **Service Control Manager** (Dienstabstürze) und **Windows Resource Exhaustion** (Speichermangel) von allen Servern einer OU. 🟢🟡🔴 Ampelanzeige für Speicherplatz D:, mcsdif.vhdx-Größe, freien Arbeitsspeicher, **CPU-Auslastung**, **Auslagerungsdatei** und **FSLogix-Dienststatus**. Zeigt aktive **Citrix Sessions**, **TOP 10 Speicherfresser** (WorkingSet) und **TOP 10 Session-RAM** (nach Benutzer gruppiert). **Medico Update-Version** live abgerufen (mit Rot-Markierung bei veralteten Versionen). Farbige EXE/DLL/Ausnahmecode/OOM-Hervorhebungen. 🔄 Auto-Refresh per `-Interval`, 🔔 Piepton bei neuen Events, 🔍 interaktive Filter im Browser. 🎛️ Alle Schwellwerte als Variablen anpassbar. 📖 [Doku →](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/System-Status-Report) |
 | [`Optimierung_Citrix_PVS.ps1`](./Citrix/Optimierung_Citrix_PVS.ps1) | Netzwerk- und Windows-Optimierung für Citrix PVS Target Devices. Deaktiviert Offload-Features (Checksum, Jumbo Packet), NIC-Energieverwaltung (3-Stufen-Fallback), IPv6, NetBIOS, Task Offload. Setzt Energieplan auf Höchstleistung, deaktiviert Ruhezustand. 🗃️ Vollständiges JSON-Backup + 🔄 **Rollback** aller Änderungen. 📖 [Doku →](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/Citrix-PVS-Optimierung) |
+
+### 📧 Outlook
+
+| Skript | Beschreibung |
+|--------|-------------|
+| [`Outlook-Mail-Explorer.ps1`](./Outlook/Outlook-Mail-Explorer.ps1) | 📧 **Outlook-Mail-Explorer mit WinForms-GUI v1.2** – Durchsucht ein oder mehrere Postfächer nach Mails mit Suchwort, Datumsbereich und Anhang-Filter. **Sortierbare Ergebnisspalten** (Klick auf Kopf), **Mehrfachauswahl** (Strg+Klick) für Sammel-Weiterleitung, **Postfach-Spalte**. Ergebnisliste mit **Weiterleitungs-Status** (erkennt doppelte Sendungen). **Vorschau** des Mail-Inhalts per Klick, **Anhänge öffnen/speichern**, **Weiterleitung** ganzer Mails oder nur der Anhänge (umschaltbar). **PDF-Filter** für reine PDF-Weiterleitung. **Navigations-Buttons** (▲/▼) zum Durchblättern. Live-Update der Weiterleitungs-Spalte bei Adressänderung. Suchabbruch, Fortschrittsanzeige, Logging. 📖 [Doku →](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/Outlook-Suche) |
 
 ---
 
