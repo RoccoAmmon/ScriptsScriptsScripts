@@ -16,7 +16,7 @@
  FEATURES:
    - Suche über alle oder ausgewählte Postfächer
    - Filter: Suchwort (Betreff + Text), Datumsbereich, nur mit Anhang
-   - Ergebnisliste mit Datum, Absender, Betreff, Anhang, Weiterleitungsstatus
+   - Ergebnisliste mit Datum, Absender, Betreff, Anhang, Weiterleitungsstatus, Postfach
    - Vorschau des Mail-Inhalts bei Klick
    - Anhänge öffnen (Doppelklick oder Button)
    - Weiterleitung: ganze Mail oder nur Anhänge (umschaltbar)
@@ -378,7 +378,8 @@ $ergebnisListe.Anchor        = 'Top','Bottom','Left','Right'
 [void]$ergebnisListe.Columns.Add("Absender", 200)
 [void]$ergebnisListe.Columns.Add("Betreff", 320)
 [void]$ergebnisListe.Columns.Add("Anhang", 70)
-[void]$ergebnisListe.Columns.Add("Weiterl.", 80)
+[void]$ergebnisListe.Columns.Add("Weiterl.", 65)
+[void]$ergebnisListe.Columns.Add("Postfach", 150)
 $form.Controls.Add($ergebnisListe)
 
 # --- Sortierung per Spaltenklick ---
@@ -614,6 +615,7 @@ $btnSuchen.Add_Click({
                         [void]$item.SubItems.Add([string]$betreff)
                         [void]$item.SubItems.Add($(if ($hatAnhang) { "Ja" } else { "Nein" }))
                         [void]$item.SubItems.Add($bereitsWeg)
+                        [void]$item.SubItems.Add([string]$postfach.DisplayName)
 
                         # Eindeutigen Schlüssel vergeben und Mail-Objekt merken
                         $key = [Guid]::NewGuid().ToString()
