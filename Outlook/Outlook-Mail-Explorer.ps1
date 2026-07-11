@@ -231,6 +231,16 @@ $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "Sizable"     # Fenster darf frei skaliert werden
 $form.MaximizeBox     = $true
 
+# --- Outlook-Icon für Taskleiste extrahieren ---
+$outlookExe = try { Get-ItemPropertyValue "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE" -Name '(default)' -ErrorAction Stop } catch { $null }
+if ($outlookExe -and (Test-Path $outlookExe)) {
+    try {
+        $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($outlookExe)
+    } catch {
+        Write-Log -Text "Konnte Outlook-Icon nicht laden: $($_.Exception.Message)" -Level WARN
+    }
+}
+
 # --- Label + Textbox: Suchwort (oben, feste Position) ---
 $lblSuchwort = New-Object System.Windows.Forms.Label
 $lblSuchwort.Location = New-Object System.Drawing.Point(15, 15)
