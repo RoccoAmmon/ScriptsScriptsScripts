@@ -233,16 +233,6 @@ $form.MaximizeBox     = $true
 $form.AutoScaleMode   = 'Font'
 $form.Font            = New-Object System.Drawing.Font("Tahoma", 10, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
 
-# --- Outlook-Icon für Taskleiste extrahieren ---
-$outlookExe = try { Get-ItemPropertyValue "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE" -Name '(default)' -ErrorAction Stop } catch { $null }
-if ($outlookExe -and (Test-Path $outlookExe)) {
-    try {
-        $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($outlookExe)
-    } catch {
-        Write-Log -Text "Konnte Outlook-Icon nicht laden: $($_.Exception.Message)" -Level WARN
-    }
-}
-
 # --- Label + Textbox: Suchwort (oben, feste Position) ---
 $lblSuchwort = New-Object System.Windows.Forms.Label
 $lblSuchwort.Location = New-Object System.Drawing.Point(15, 15)
@@ -385,7 +375,7 @@ $form.Controls.Add($lblErgebnis)
 
 $ergebnisListe = New-Object System.Windows.Forms.ListView
 $ergebnisListe.Location      = New-Object System.Drawing.Point(15, 248)
-$ergebnisListe.Size          = New-Object System.Drawing.Size(($fensterBrt - 55), ($fensterHoe - 590))
+$ergebnisListe.Size          = New-Object System.Drawing.Size(($fensterBrt - 55), ($fensterHoe - 565))
 $ergebnisListe.View          = 'Details'
 $ergebnisListe.FullRowSelect = $true
 $ergebnisListe.GridLines     = $true
@@ -499,7 +489,7 @@ $form.Controls.Add($progressBar)
 
 # --- Vorschau-Textbox (Mailinhalt) - links, unten verankert ---
 $txtVorschau = New-Object System.Windows.Forms.TextBox
-$txtVorschau.Location   = New-Object System.Drawing.Point(15, ($fensterHoe - 185))
+$txtVorschau.Location   = New-Object System.Drawing.Point(15, ($fensterHoe - 190))
 $txtVorschau.Size       = New-Object System.Drawing.Size(($fensterBrt - 245), 150)
 $txtVorschau.Multiline  = $true
 $txtVorschau.ScrollBars = 'Vertical'
@@ -509,7 +499,7 @@ $form.Controls.Add($txtVorschau)
 
 # --- Label + Liste: Anhänge (rechts neben der Vorschau) ---
 $lblAnhaenge = New-Object System.Windows.Forms.Label
-$lblAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 210))
+$lblAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 215))
 $lblAnhaenge.Size     = New-Object System.Drawing.Size(180, 25)
 $lblAnhaenge.Text     = "Anhänge:"
 $lblAnhaenge.Font     = New-Object System.Drawing.Font($lblAnhaenge.Font, 'Bold')
@@ -517,7 +507,7 @@ $lblAnhaenge.Anchor   = 'Bottom','Right'
 $form.Controls.Add($lblAnhaenge)
 
 $lstAnhaenge = New-Object System.Windows.Forms.ListBox
-$lstAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 185))
+$lstAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 190))
 $lstAnhaenge.Size     = New-Object System.Drawing.Size(180, 150)
 $lstAnhaenge.Anchor   = 'Bottom','Right'
 $form.Controls.Add($lstAnhaenge)
