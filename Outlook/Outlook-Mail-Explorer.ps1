@@ -508,8 +508,9 @@ $form.Controls.Add($txtVorschau)
 # --- Label + Liste: Anhänge (rechts neben der Vorschau) ---
 $lblAnhaenge = New-Object System.Windows.Forms.Label
 $lblAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 230))
-$lblAnhaenge.Size     = New-Object System.Drawing.Size(180, 18)
+$lblAnhaenge.Size     = New-Object System.Drawing.Size(180, 20)
 $lblAnhaenge.Text     = "Anhänge:"
+$lblAnhaenge.Font     = New-Object System.Drawing.Font($lblAnhaenge.Font, 'Bold')
 $lblAnhaenge.Anchor   = 'Bottom','Right'
 $form.Controls.Add($lblAnhaenge)
 
