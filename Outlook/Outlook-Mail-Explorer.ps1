@@ -383,7 +383,7 @@ $form.Controls.Add($lblErgebnis)
 
 $ergebnisListe = New-Object System.Windows.Forms.ListView
 $ergebnisListe.Location      = New-Object System.Drawing.Point(15, 248)
-$ergebnisListe.Size          = New-Object System.Drawing.Size(($fensterBrt - 55), ($fensterHoe - 560))
+$ergebnisListe.Size          = New-Object System.Drawing.Size(($fensterBrt - 55), ($fensterHoe - 590))
 $ergebnisListe.View          = 'Details'
 $ergebnisListe.FullRowSelect = $true
 $ergebnisListe.GridLines     = $true
@@ -497,7 +497,7 @@ $form.Controls.Add($progressBar)
 
 # --- Vorschau-Textbox (Mailinhalt) - links, unten verankert ---
 $txtVorschau = New-Object System.Windows.Forms.TextBox
-$txtVorschau.Location   = New-Object System.Drawing.Point(15, ($fensterHoe - 210))
+$txtVorschau.Location   = New-Object System.Drawing.Point(15, ($fensterHoe - 185))
 $txtVorschau.Size       = New-Object System.Drawing.Size(($fensterBrt - 245), 150)
 $txtVorschau.Multiline  = $true
 $txtVorschau.ScrollBars = 'Vertical'
@@ -507,15 +507,15 @@ $form.Controls.Add($txtVorschau)
 
 # --- Label + Liste: Anhänge (rechts neben der Vorschau) ---
 $lblAnhaenge = New-Object System.Windows.Forms.Label
-$lblAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 230))
-$lblAnhaenge.Size     = New-Object System.Drawing.Size(180, 20)
+$lblAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 210))
+$lblAnhaenge.Size     = New-Object System.Drawing.Size(180, 25)
 $lblAnhaenge.Text     = "Anhänge:"
 $lblAnhaenge.Font     = New-Object System.Drawing.Font($lblAnhaenge.Font, 'Bold')
 $lblAnhaenge.Anchor   = 'Bottom','Right'
 $form.Controls.Add($lblAnhaenge)
 
 $lstAnhaenge = New-Object System.Windows.Forms.ListBox
-$lstAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 210))
+$lstAnhaenge.Location = New-Object System.Drawing.Point(($fensterBrt - 220), ($fensterHoe - 185))
 $lstAnhaenge.Size     = New-Object System.Drawing.Size(180, 150)
 $lstAnhaenge.Anchor   = 'Bottom','Right'
 $form.Controls.Add($lstAnhaenge)
