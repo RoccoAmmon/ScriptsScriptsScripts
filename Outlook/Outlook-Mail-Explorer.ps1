@@ -412,23 +412,41 @@ $ergebnisListe.Add_ColumnClick({
     $sender.Sort()
 })
 
+# --- Navigations-Buttons (vor/zurück in der Trefferliste) ---
+$btnVorherige = New-Object System.Windows.Forms.Button
+$btnVorherige.Location = New-Object System.Drawing.Point(15, ($fensterHoe - 300))
+$btnVorherige.Size     = New-Object System.Drawing.Size(30, 28)
+$btnVorherige.Text     = "▲"
+$btnVorherige.Anchor   = 'Bottom','Left'
+$toolTip = New-Object System.Windows.Forms.ToolTip
+$toolTip.SetToolTip($btnVorherige, "Vorherige Mail")
+$form.Controls.Add($btnVorherige)
+
+$btnNaechste = New-Object System.Windows.Forms.Button
+$btnNaechste.Location = New-Object System.Drawing.Point(50, ($fensterHoe - 300))
+$btnNaechste.Size     = New-Object System.Drawing.Size(30, 28)
+$btnNaechste.Text     = "▼"
+$btnNaechste.Anchor   = 'Bottom','Left'
+$toolTip.SetToolTip($btnNaechste, "Nächste Mail")
+$form.Controls.Add($btnNaechste)
+
 # --- Aktions-Buttons unter der Liste (am unteren Rand verankert) ---
 $btnInhalt = New-Object System.Windows.Forms.Button
-$btnInhalt.Location = New-Object System.Drawing.Point(15, ($fensterHoe - 300))
+$btnInhalt.Location = New-Object System.Drawing.Point(95, ($fensterHoe - 300))
 $btnInhalt.Size     = New-Object System.Drawing.Size(150, 28)
 $btnInhalt.Text     = "Inhalt anzeigen"
 $btnInhalt.Anchor   = 'Bottom','Left'
 $form.Controls.Add($btnInhalt)
 
 $btnAnhang = New-Object System.Windows.Forms.Button
-$btnAnhang.Location = New-Object System.Drawing.Point(175, ($fensterHoe - 300))
+$btnAnhang.Location = New-Object System.Drawing.Point(255, ($fensterHoe - 300))
 $btnAnhang.Size     = New-Object System.Drawing.Size(150, 28)
 $btnAnhang.Text     = "Anhang öffnen"
 $btnAnhang.Anchor   = 'Bottom','Left'
 $form.Controls.Add($btnAnhang)
 
 $btnWeiterleiten = New-Object System.Windows.Forms.Button
-$btnWeiterleiten.Location  = New-Object System.Drawing.Point(335, ($fensterHoe - 300))
+$btnWeiterleiten.Location  = New-Object System.Drawing.Point(415, ($fensterHoe - 300))
 $btnWeiterleiten.Size      = New-Object System.Drawing.Size(180, 28)
 $btnWeiterleiten.Text      = "Ausgewählte weiterleiten"
 $btnWeiterleiten.BackColor = [System.Drawing.Color]::PaleGreen
@@ -742,6 +760,31 @@ $aktionVorschau = {
 # Vorschau sofort bei Auswahl (Klick / Pfeiltasten) - und per Button verfügbar
 $ergebnisListe.Add_SelectedIndexChanged($aktionVorschau)
 $btnInhalt.Add_Click($aktionVorschau)
+
+# --- Navigation: Vorherige / Nächste Mail ---
+$btnVorherige.Add_Click({
+    if ($ergebnisListe.SelectedItems.Count -gt 0 -and $ergebnisListe.Items.Count -gt 0) {
+        $idx = $ergebnisListe.Items.IndexOf($ergebnisListe.SelectedItems[0])
+        if ($idx -gt 0) {
+            $ergebnisListe.Items[$idx].Selected = $false
+            $ergebnisListe.Items[$idx - 1].Selected = $true
+            $ergebnisListe.Items[$idx - 1].Focused = $true
+            $ergebnisListe.EnsureVisible($idx - 1)
+        }
+    }
+})
+
+$btnNaechste.Add_Click({
+    if ($ergebnisListe.SelectedItems.Count -gt 0 -and $ergebnisListe.Items.Count -gt 0) {
+        $idx = $ergebnisListe.Items.IndexOf($ergebnisListe.SelectedItems[0])
+        if ($idx -lt $ergebnisListe.Items.Count - 1) {
+            $ergebnisListe.Items[$idx].Selected = $false
+            $ergebnisListe.Items[$idx + 1].Selected = $true
+            $ergebnisListe.Items[$idx + 1].Focused = $true
+            $ergebnisListe.EnsureVisible($idx + 1)
+        }
+    }
+})
 
 # --- Anhang öffnen ---
 # Öffnet den in der Anhangsliste markierten Anhang; ist keiner markiert, werden alle geöffnet.
