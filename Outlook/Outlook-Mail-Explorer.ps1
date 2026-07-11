@@ -1,7 +1,7 @@
 ﻿<#
 ==================================================================================
  SCRIPT   : Outlook-Mail-Explorer.ps1
- VERSION  : 1.0
+ VERSION  : 1.1
  AUTOR    : Rocco Ammon
  DATUM    : 2026-07-11
 ==================================================================================
@@ -17,11 +17,14 @@
    - Suche über alle oder ausgewählte Postfächer
    - Filter: Suchwort (Betreff + Text), Datumsbereich, nur mit Anhang
    - Ergebnisliste mit Datum, Absender, Betreff, Anhang, Weiterleitungsstatus, Postfach
+   - Sortierung per Klick auf Spaltenüberschrift
+   - Mehrfachauswahl (Strg+Klick) für Sammel-Weiterleitung
    - Vorschau des Mail-Inhalts bei Klick
    - Anhänge öffnen (Doppelklick oder Button)
    - Weiterleitung: ganze Mail oder nur Anhänge (umschaltbar)
    - Weiterleitungs-Historie (erkennt doppelte Sendungen)
    - Live-Update der Weiterleitungs-Spalte bei Adressänderung
+   - Auto-Update der Weiterl.-Spalte nach dem Weiterleiten
    - Suchabbruch jederzeit möglich
    - Fortschrittsanzeige mit ProgressBar
    - Logging nach C:\ScriptLog\
