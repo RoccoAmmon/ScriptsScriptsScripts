@@ -855,9 +855,14 @@ $btnWeiterleiten.Add_Click({
                         continue weiterleitung
                     }
 
-                    # Anhänge speichern
+                    # Anhänge speichern (nur PDFs)
                     $savedFiles = @()
                     foreach ($att in $originalMail.Attachments) {
+                        $ext = [System.IO.Path]::GetExtension($att.FileName)
+                        if ($ext -notmatch '\.pdf') {
+                            Write-Log -Text "Anhang '$($att.FileName)' ist keine PDF - uebersprungen." -Level INFO
+                            continue
+                        }
                         $fileName = $att.FileName -replace '[<>:"/\\|?*]', '_'
                         $filePath = Join-Path $tmpDir $fileName
                         $counter = 1
@@ -870,6 +875,12 @@ $btnWeiterleiten.Add_Click({
                         }
                         $att.SaveAsFile($filePath)
                         $savedFiles += $filePath
+                    }
+
+                    # Keine PDFs → Mail überspringen
+                    if ($savedFiles.Count -eq 0) {
+                        Write-Log -Text "Mail '$($originalMail.Subject)' enthaelt keine PDF-Anhaenge - uebersprungen." -Level WARN
+                        continue weiterleitung
                     }
 
                     # Neue Mail mit Anhängen erstellen und senden
