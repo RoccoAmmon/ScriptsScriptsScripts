@@ -35,10 +35,10 @@
     .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -DaysBack 14
 
 .NOTES
-    Version  : 1.10
+    Version  : 1.11
     Autor    : Rocco Ammon
-    Änderung : CPU-Auslastung, Auslagerungsdatei (Pagefile), FSLogix-Dienststatus
-               in die Ampel-Tabelle aufgenommen.
+    Änderung : Citrix CVAD Registration-Status + Wartungsmodus als Ampeln in der Statusübersicht.
+               Broker-Abfrage via Get-BrokerMachine (PSSnapin Citrix.Broker.Admin.V2).
 #>
 
 [CmdletBinding()]
@@ -136,6 +136,37 @@ try {
 
     Write-Host "$($Computers.Count) Server gefunden, starte parallele Abfragen (ThrottleLimit=$ThrottleLimit) ..." -ForegroundColor Cyan
     Write-Log  "$($Computers.Count) Server gefunden."
+
+    # =====================================================================
+    # Region: Citrix CVAD Broker-Abfrage (Registration + Wartungsmodus)
+    # =====================================================================
+    $CitrixBrokerData = @{}
+    try {
+        $brokerSnapin = Get-PSSnapin -Name Citrix.Broker.Admin.V2 -Registered -ErrorAction SilentlyContinue
+        $brokerModule = Get-Module -Name Citrix.Broker.Admin.V2 -ListAvailable -ErrorAction SilentlyContinue
+        if ($brokerModule -or $brokerSnapin) {
+            if ($brokerSnapin -and -not (Get-PSSnapin -Name Citrix.Broker.Admin.V2 -ErrorAction SilentlyContinue)) {
+                Add-PSSnapin Citrix.Broker.Admin.V2 -ErrorAction Stop
+            }
+            $brokerMachines = Get-BrokerMachine -Property DNSName, RegistrationState, InMaintenanceMode -ErrorAction Stop
+            foreach ($bm in $brokerMachines) {
+                $shortName = $bm.DNSName -replace '\..*$', ''
+                $CitrixBrokerData[$shortName.ToUpper()] = @{
+                    Registered   = $bm.RegistrationState
+                    Maintenance  = $bm.InMaintenanceMode
+                }
+            }
+            Write-Host "  Citrix Broker: $($CitrixBrokerData.Count) Maschinen geladen" -ForegroundColor Green
+            Write-Log  "Citrix Broker: $($CitrixBrokerData.Count) Maschinen geladen"
+        } else {
+            Write-Host "  Citrix Broker PowerShell nicht verfügbar – Spalten zeigen 'n/a'" -ForegroundColor Yellow
+            Write-Log  "Citrix Broker PowerShell nicht verfügbar" 'WARN'
+        }
+    }
+    catch {
+        Write-Host "  Citrix Broker-Abfrage fehlgeschlagen: $_" -ForegroundColor Yellow
+        Write-Log   "Citrix Broker-Abfrage fehlgeschlagen: $($_.Exception.Message)" 'WARN'
+    }
 
     # =====================================================================
     # Region: Parallele Server-Abfragen via Invoke-Command
@@ -352,23 +383,26 @@ try {
             }
         }
 
+        $cbEntry = $CitrixBrokerData[$result.Computer.ToUpper()]
         [void]$DriveResults.Add([PSCustomObject]@{
-            Server           = $result.Computer
-            FreeGB           = $result.FreeGB
-            TotalGB          = $result.TotalGB
-            FreePct          = $result.FreePct
-            VhdxExists       = $result.VhdxExists
-            VhdxSizeGB       = $result.VhdxSizeGB
-            MemFreeMB        = $result.MemFreeMB
-            MemTotalMB       = $result.MemTotalMB
-            MemFreePct       = $result.MemFreePct
-            Sessions         = $result.Sessions
-            CpuPct           = $result.CpuPct
-            PageFileMB       = $result.PageFileMB
-            PageFileTotalMB  = $result.PageFileTotalMB
-            PageFileUsagePct = $result.PageFileUsagePct
-            FslogixServices  = $result.FslogixServices
-            MedicoUpdateId   = $result.MedicoUpdateId
+            Server               = $result.Computer
+            FreeGB               = $result.FreeGB
+            TotalGB              = $result.TotalGB
+            FreePct              = $result.FreePct
+            VhdxExists           = $result.VhdxExists
+            VhdxSizeGB           = $result.VhdxSizeGB
+            MemFreeMB            = $result.MemFreeMB
+            MemTotalMB           = $result.MemTotalMB
+            MemFreePct           = $result.MemFreePct
+            Sessions             = $result.Sessions
+            CpuPct               = $result.CpuPct
+            PageFileMB           = $result.PageFileMB
+            PageFileTotalMB      = $result.PageFileTotalMB
+            PageFileUsagePct     = $result.PageFileUsagePct
+            FslogixServices      = $result.FslogixServices
+            MedicoUpdateId       = $result.MedicoUpdateId
+            CitrixRegistered     = if ($cbEntry) { $cbEntry.Registered } else { $null }
+            CitrixMaintenance    = if ($cbEntry) { $cbEntry.Maintenance } else { $null }
         })
 
         if ($result.TopProcs -and $result.TopProcs.Count -gt 0) {
@@ -679,7 +713,7 @@ try {
         [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
         [void]$Html.AppendLine('    <table id="ampelTable">')
         $medicoHeader = if ($EnableMedicoCheck) { '<th>Medico</th>' } else { '' }
-        [void]$Html.AppendLine('        <tr><th>Server</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th>' + $medicoHeader + '</tr>')
+        [void]$Html.AppendLine('        <tr><th>Server</th><th>CVAD-Registriert</th><th>Wartungsmodus</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th>' + $medicoHeader + '</tr>')
 
         foreach ($drv in ($DriveResults | Sort-Object Server)) {
             $serverName = $drv.Server
@@ -748,7 +782,20 @@ try {
                 $medicoCell = '<td style="text-align:center">' + $medicoDisplay + '</td>'
             }
 
-            [void]$Html.AppendLine("        <tr><td>$serverName</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td>$medicoCell</tr>")
+            # Citrix CVAD-Registrierung + Wartungsmodus
+            if ($drv.CitrixRegistered -ne $null) {
+                $regState = $drv.CitrixRegistered
+                $ampelReg = if ($regState -eq 'Registered') { 'ampel-green' } elseif ($regState -eq 'Unregistered') { 'ampel-red' } else { 'ampel-yellow' }
+                $regDisplay = "<span class=""ampel $ampelReg"" style=""font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$regState</span>"
+            } else { $regDisplay = '<span class="ampel ampel-gray" style="font-size:12px;min-width:auto;padding:2px 10px;cursor:default">n/a</span>' }
+
+            if ($drv.CitrixMaintenance -ne $null) {
+                $ampelMaint = if ($drv.CitrixMaintenance) { 'ampel-red' } else { 'ampel-green' }
+                $maintText = if ($drv.CitrixMaintenance) { 'Ja' } else { 'Nein' }
+                $maintDisplay = "<span class=""ampel $ampelMaint"" style=""font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$maintText</span>"
+            } else { $maintDisplay = '<span class="ampel ampel-gray" style="font-size:12px;min-width:auto;padding:2px 10px;cursor:default">n/a</span>' }
+
+            [void]$Html.AppendLine("        <tr><td>$serverName</td><td>$regDisplay</td><td>$maintDisplay</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td>$medicoCell</tr>")
         }
         [void]$Html.AppendLine('    </table>')
     }
