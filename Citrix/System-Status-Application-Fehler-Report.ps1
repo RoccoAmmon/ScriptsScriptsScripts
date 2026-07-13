@@ -53,7 +53,10 @@ param (
     [int]$DaysBack = 7,
 
     [Parameter(Mandatory = $false)]
-    [int]$Interval = 0
+    [int]$Interval = 0,
+
+    [Parameter(Mandatory = $false)]
+    [string]$CitrixBrokerController
 )
 
 # =========================================================================
@@ -83,7 +86,7 @@ $ThresholdSessionRed     = 14   # Sessions über X = rot
 $ThresholdSessionYellow  = 11   # Sessions über X = gelb
 $EnableMedicoCheck       = $true
 $ThrottleLimit           = 15   # Parallele Server-Abfragen (Invoke-Command)
-$CitrixBrokerController  = ''   # Broker-Controller für CVAD-Registrierung (leer = überspringen)
+$CitrixBrokerController  = if ($PSBoundParameters.ContainsKey('CitrixBrokerController')) { $CitrixBrokerController } else { '' }
 
 function Write-Log {
     param(
