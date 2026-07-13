@@ -704,7 +704,7 @@ try {
         [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
         [void]$Html.AppendLine('    <table id="ampelTable">')
         $medicoHeader = if ($EnableMedicoCheck) { '<th>Medico</th>' } else { '' }
-        [void]$Html.AppendLine('        <tr><th>Server</th><th>CVAD-Registriert</th><th>Wartungsmodus</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th>' + $medicoHeader + '</tr>')
+        [void]$Html.AppendLine('        <tr><th>Server</th><th>Registriert</th><th>Wartung</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th>' + $medicoHeader + '</tr>')
 
         foreach ($drv in ($DriveResults | Sort-Object Server)) {
             $serverName = $drv.Server
@@ -777,14 +777,14 @@ try {
             if ($drv.CitrixRegistered -ne $null) {
                 $regState = $drv.CitrixRegistered
                 $ampelReg = if ($regState -eq 'Registered') { 'ampel-green' } elseif ($regState -eq 'Unregistered') { 'ampel-red' } else { 'ampel-yellow' }
-                $regDisplay = "<span class=""ampel $ampelReg"" style=""font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$regState</span>"
-            } else { $regDisplay = '<span class="ampel ampel-gray" style="font-size:12px;min-width:auto;padding:2px 10px;cursor:default">n/a</span>' }
+                $regDisplay = "<span class=""ampel $ampelReg"" style=""font-size:11px;min-width:auto;padding:2px 10px;cursor:default"">$regState</span>"
+            } else { $regDisplay = '<span class="ampel ampel-gray" style="font-size:11px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
 
-            if ($drv.CitrixMaintenance -ne $null) {
-                $ampelMaint = if ($drv.CitrixMaintenance) { 'ampel-red' } else { 'ampel-green' }
-                $maintText = if ($drv.CitrixMaintenance) { 'Ja' } else { 'Nein' }
-                $maintDisplay = "<span class=""ampel $ampelMaint"" style=""font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$maintText</span>"
-            } else { $maintDisplay = '<span class="ampel ampel-gray" style="font-size:12px;min-width:auto;padding:2px 10px;cursor:default">n/a</span>' }
+            if ($drv.CitrixMaintenance -eq $true) {
+                $maintDisplay = '<span class="ampel ampel-yellow" style="font-size:11px;min-width:auto;padding:2px 10px;cursor:default">Wartung</span>'
+            } elseif ($drv.CitrixMaintenance -eq $false) {
+                $maintDisplay = '<span class="ampel ampel-green" style="font-size:11px;min-width:auto;padding:2px 10px;cursor:default">Nein</span>'
+            } else { $maintDisplay = '<span class="ampel ampel-gray" style="font-size:11px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
 
             [void]$Html.AppendLine("        <tr><td>$serverName</td><td>$regDisplay</td><td>$maintDisplay</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td>$medicoCell</tr>")
         }
