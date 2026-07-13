@@ -35,9 +35,10 @@
     .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -DaysBack 14
 
 .NOTES
-    Version  : 1.11
+    Version  : 1.12
     Autor    : Rocco Ammon
-    Änderung : Citrix CVAD Registration + Wartungsmodus per Registry auf VDA.
+    Änderung : Citrix CVAD Registration + Wartungsmodus per Registry (State\Registered,
+               Policies\DesktopServer\MaintenanceMode). Kompakte Spaltenköpfe.
                Keine Broker/Controller-Abfrage mehr nötig.
 #>
 
