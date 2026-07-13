@@ -299,13 +299,13 @@ try {
         $citrixRegistered = $null
         $citrixMaintenance = $null
         try {
-            $regState = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Citrix\VirtualDesktopAgent' -Name State -ErrorAction SilentlyContinue
-            if ($regState) {
-                $citrixRegistered = switch ($regState.State) {
+            $regState = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Citrix\VirtualDesktopAgent\State' -Name Registered -ErrorAction SilentlyContinue
+            if ($regState -and $regState.Registered -ne $null) {
+                $citrixRegistered = switch ($regState.Registered) {
                     0 { 'Unregistered' }
-                    1 { 'Registered' }
-                    2 { 'Registering' }
-                    default { "Unknown ($($regState.State))" }
+                    1 { 'Registering' }
+                    2 { 'Registered' }
+                    default { "Unknown ($($regState.Registered))" }
                 }
             }
         } catch {}
