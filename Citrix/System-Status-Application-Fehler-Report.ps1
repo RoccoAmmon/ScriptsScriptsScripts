@@ -37,8 +37,8 @@
 .NOTES
     Version  : 1.11
     Autor    : Rocco Ammon
-    Änderung : Citrix CVAD Registration-Status + Wartungsmodus als Ampeln in der Statusübersicht.
-               Broker-Abfrage via Get-BrokerMachine (PSSnapin Citrix.Broker.Admin.V2).
+    Änderung : Citrix CVAD Registration + Wartungsmodus per Registry auf VDA.
+               Keine Broker/Controller-Abfrage mehr nötig.
 #>
 
 [CmdletBinding()]
@@ -53,10 +53,7 @@ param (
     [int]$DaysBack = 7,
 
     [Parameter(Mandatory = $false)]
-    [int]$Interval = 0,
-
-    [Parameter(Mandatory = $false)]
-    [string]$CitrixBrokerController
+    [int]$Interval = 0
 )
 
 # =========================================================================
@@ -86,7 +83,6 @@ $ThresholdSessionRed     = 14   # Sessions über X = rot
 $ThresholdSessionYellow  = 11   # Sessions über X = gelb
 $EnableMedicoCheck       = $true
 $ThrottleLimit           = 15   # Parallele Server-Abfragen (Invoke-Command)
-$CitrixBrokerController  = if ($PSBoundParameters.ContainsKey('CitrixBrokerController')) { $CitrixBrokerController } else { '' }
 
 function Write-Log {
     param(
@@ -142,51 +138,6 @@ try {
     Write-Log  "$($Computers.Count) Server gefunden."
 
     # =====================================================================
-    # Region: Citrix CVAD Broker-Abfrage (Registration + Wartungsmodus)
-    # =====================================================================
-    $CitrixBrokerData = @{}
-    if (-not [string]::IsNullOrWhiteSpace($CitrixBrokerController)) {
-        try {
-            $brokerScriptBlock = {
-                try {
-                    $snapin = Get-PSSnapin -Name Citrix.Broker.Admin.V2 -Registered -ErrorAction SilentlyContinue
-                    $module = Get-Module -Name Citrix.Broker.Admin.V2 -ListAvailable -ErrorAction SilentlyContinue
-                    if (-not ($module -or $snapin)) { return $null }
-                    if ($snapin -and -not (Get-PSSnapin -Name Citrix.Broker.Admin.V2 -ErrorAction SilentlyContinue)) {
-                        Add-PSSnapin Citrix.Broker.Admin.V2 -ErrorAction Stop
-                    }
-                    $bm = Get-BrokerMachine -Property DNSName, RegistrationState, InMaintenanceMode -ErrorAction Stop
-                    $result = @{}
-                    foreach ($m in $bm) {
-                        $short = $m.DNSName -replace '\..*$', ''
-                        $result[$short.ToUpper()] = @{
-                            Registered  = $m.RegistrationState
-                            Maintenance = $m.InMaintenanceMode
-                        }
-                    }
-                    return $result
-                } catch { return $null }
-            }
-            $brokerResult = Invoke-Command -ComputerName $CitrixBrokerController -ScriptBlock $brokerScriptBlock -ErrorAction Stop
-            if ($brokerResult -is [hashtable]) {
-                $CitrixBrokerData = $brokerResult
-                Write-Host "  Citrix Broker: $($CitrixBrokerData.Count) Maschinen geladen (via $CitrixBrokerController)" -ForegroundColor Green
-                Write-Log  "Citrix Broker: $($CitrixBrokerData.Count) Maschinen geladen (via $CitrixBrokerController)"
-            } else {
-                Write-Host "  Citrix Broker PowerShell auf $CitrixBrokerController nicht verfügbar – Spalten zeigen 'n/a'" -ForegroundColor Yellow
-                Write-Log  "Citrix Broker PowerShell auf $CitrixBrokerController nicht verfügbar" 'WARN'
-            }
-        }
-        catch {
-            Write-Host "  Citrix Broker-Abfrage über $CitrixBrokerController fehlgeschlagen: $_" -ForegroundColor Yellow
-            Write-Log   "Citrix Broker-Abfrage fehlgeschlagen: $($_.Exception.Message)" 'WARN'
-        }
-    } else {
-        Write-Host "  Citrix Broker-Controller nicht konfiguriert – CVAD-Spalten zeigen 'n/a'" -ForegroundColor Yellow
-        Write-Log  "Citrix Broker-Controller nicht konfiguriert" 'WARN'
-    }
-
-    # =====================================================================
     # Region: Parallele Server-Abfragen via Invoke-Command
     # =====================================================================
     $LogQueriesJson = $LogQueries | ConvertTo-Json -Compress
@@ -213,6 +164,8 @@ try {
                 PageFileMB       = $null; PageFileTotalMB = $null; PageFileUsagePct = $null
                 FslogixServices  = @()
                 MedicoUpdateId   = $null
+                CitrixRegistered = $null
+                CitrixMaintenance = $null
             }
         }
 
@@ -342,6 +295,25 @@ try {
             } catch {}
         }
 
+        # Citrix CVAD Registration + MaintenanceMode via Registry
+        $citrixRegistered = $null
+        $citrixMaintenance = $null
+        try {
+            $regState = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Citrix\VirtualDesktopAgent' -Name State -ErrorAction SilentlyContinue
+            if ($regState) {
+                $citrixRegistered = switch ($regState.State) {
+                    0 { 'Unregistered' }
+                    1 { 'Registered' }
+                    2 { 'Registering' }
+                    default { "Unknown ($($regState.State))" }
+                }
+            }
+        } catch {}
+        try {
+            $regMaint = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Citrix\DesktopServer' -Name MaintenanceMode -ErrorAction SilentlyContinue
+            $citrixMaintenance = if ($regMaint -and $regMaint.MaintenanceMode -eq 1) { $true } else { $false }
+        } catch {}
+
         if ($drive) {
             $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
             $totalGB = [math]::Round($drive.Size / 1GB, 2)
@@ -369,6 +341,8 @@ try {
             PageFileUsagePct = $pfUsagePct
             FslogixServices  = $fslogixServices
             MedicoUpdateId   = $medicoUpdateId
+            CitrixRegistered = $citrixRegistered
+            CitrixMaintenance = $citrixMaintenance
         }
     }
 
@@ -401,7 +375,6 @@ try {
             }
         }
 
-        $cbEntry = $CitrixBrokerData[$result.Computer.ToUpper()]
         [void]$DriveResults.Add([PSCustomObject]@{
             Server               = $result.Computer
             FreeGB               = $result.FreeGB
@@ -419,8 +392,8 @@ try {
             PageFileUsagePct     = $result.PageFileUsagePct
             FslogixServices      = $result.FslogixServices
             MedicoUpdateId       = $result.MedicoUpdateId
-            CitrixRegistered     = if ($cbEntry) { $cbEntry.Registered } else { $null }
-            CitrixMaintenance    = if ($cbEntry) { $cbEntry.Maintenance } else { $null }
+            CitrixRegistered     = $result.CitrixRegistered
+            CitrixMaintenance    = $result.CitrixMaintenance
         })
 
         if ($result.TopProcs -and $result.TopProcs.Count -gt 0) {
