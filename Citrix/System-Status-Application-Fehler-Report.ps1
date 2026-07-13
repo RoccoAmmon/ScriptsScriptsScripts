@@ -83,6 +83,7 @@ $ThresholdSessionRed     = 14   # Sessions über X = rot
 $ThresholdSessionYellow  = 11   # Sessions über X = gelb
 $EnableMedicoCheck       = $true
 $ThrottleLimit           = 15   # Parallele Server-Abfragen (Invoke-Command)
+$CitrixBrokerController  = ''   # Broker-Controller für CVAD-Registrierung (leer = überspringen)
 
 function Write-Log {
     param(
@@ -141,31 +142,45 @@ try {
     # Region: Citrix CVAD Broker-Abfrage (Registration + Wartungsmodus)
     # =====================================================================
     $CitrixBrokerData = @{}
-    try {
-        $brokerSnapin = Get-PSSnapin -Name Citrix.Broker.Admin.V2 -Registered -ErrorAction SilentlyContinue
-        $brokerModule = Get-Module -Name Citrix.Broker.Admin.V2 -ListAvailable -ErrorAction SilentlyContinue
-        if ($brokerModule -or $brokerSnapin) {
-            if ($brokerSnapin -and -not (Get-PSSnapin -Name Citrix.Broker.Admin.V2 -ErrorAction SilentlyContinue)) {
-                Add-PSSnapin Citrix.Broker.Admin.V2 -ErrorAction Stop
+    if (-not [string]::IsNullOrWhiteSpace($CitrixBrokerController)) {
+        try {
+            $brokerScriptBlock = {
+                try {
+                    $snapin = Get-PSSnapin -Name Citrix.Broker.Admin.V2 -Registered -ErrorAction SilentlyContinue
+                    $module = Get-Module -Name Citrix.Broker.Admin.V2 -ListAvailable -ErrorAction SilentlyContinue
+                    if (-not ($module -or $snapin)) { return $null }
+                    if ($snapin -and -not (Get-PSSnapin -Name Citrix.Broker.Admin.V2 -ErrorAction SilentlyContinue)) {
+                        Add-PSSnapin Citrix.Broker.Admin.V2 -ErrorAction Stop
+                    }
+                    $bm = Get-BrokerMachine -Property DNSName, RegistrationState, InMaintenanceMode -ErrorAction Stop
+                    $result = @{}
+                    foreach ($m in $bm) {
+                        $short = $m.DNSName -replace '\..*$', ''
+                        $result[$short.ToUpper()] = @{
+                            Registered  = $m.RegistrationState
+                            Maintenance = $m.InMaintenanceMode
+                        }
+                    }
+                    return $result
+                } catch { return $null }
             }
-            $brokerMachines = Get-BrokerMachine -Property DNSName, RegistrationState, InMaintenanceMode -ErrorAction Stop
-            foreach ($bm in $brokerMachines) {
-                $shortName = $bm.DNSName -replace '\..*$', ''
-                $CitrixBrokerData[$shortName.ToUpper()] = @{
-                    Registered   = $bm.RegistrationState
-                    Maintenance  = $bm.InMaintenanceMode
-                }
+            $brokerResult = Invoke-Command -ComputerName $CitrixBrokerController -ScriptBlock $brokerScriptBlock -ErrorAction Stop
+            if ($brokerResult -is [hashtable]) {
+                $CitrixBrokerData = $brokerResult
+                Write-Host "  Citrix Broker: $($CitrixBrokerData.Count) Maschinen geladen (via $CitrixBrokerController)" -ForegroundColor Green
+                Write-Log  "Citrix Broker: $($CitrixBrokerData.Count) Maschinen geladen (via $CitrixBrokerController)"
+            } else {
+                Write-Host "  Citrix Broker PowerShell auf $CitrixBrokerController nicht verfügbar – Spalten zeigen 'n/a'" -ForegroundColor Yellow
+                Write-Log  "Citrix Broker PowerShell auf $CitrixBrokerController nicht verfügbar" 'WARN'
             }
-            Write-Host "  Citrix Broker: $($CitrixBrokerData.Count) Maschinen geladen" -ForegroundColor Green
-            Write-Log  "Citrix Broker: $($CitrixBrokerData.Count) Maschinen geladen"
-        } else {
-            Write-Host "  Citrix Broker PowerShell nicht verfügbar – Spalten zeigen 'n/a'" -ForegroundColor Yellow
-            Write-Log  "Citrix Broker PowerShell nicht verfügbar" 'WARN'
         }
-    }
-    catch {
-        Write-Host "  Citrix Broker-Abfrage fehlgeschlagen: $_" -ForegroundColor Yellow
-        Write-Log   "Citrix Broker-Abfrage fehlgeschlagen: $($_.Exception.Message)" 'WARN'
+        catch {
+            Write-Host "  Citrix Broker-Abfrage über $CitrixBrokerController fehlgeschlagen: $_" -ForegroundColor Yellow
+            Write-Log   "Citrix Broker-Abfrage fehlgeschlagen: $($_.Exception.Message)" 'WARN'
+        }
+    } else {
+        Write-Host "  Citrix Broker-Controller nicht konfiguriert – CVAD-Spalten zeigen 'n/a'" -ForegroundColor Yellow
+        Write-Log  "Citrix Broker-Controller nicht konfiguriert" 'WARN'
     }
 
     # =====================================================================
