@@ -31,7 +31,7 @@
 
 | Skript | Beschreibung |
 |--------|-------------|
-| [`System-Status-Application-Fehler-Report.ps1`](./Citrix/System-Status-Application-Fehler-Report.ps1) | Erweiterter System-Status-Report – sammelt **Application Error/Hang/Popup**, **Service Control Manager** (Dienstabstürze) und **Windows Resource Exhaustion** (Speichermangel) von allen Servern einer OU. 🟢🟡🔴 Ampelanzeige für Speicherplatz D:, mcsdif.vhdx-Größe, freien Arbeitsspeicher, **CPU-Auslastung**, **Auslagerungsdatei** und **FSLogix-Dienststatus**. Zeigt aktive **Citrix Sessions**, **TOP 10 Speicherfresser** (WorkingSet) und **TOP 10 Session-RAM** (nach Benutzer gruppiert). **Citrix CVAD Registration** (Registered/Unregistered/Registering) + **Wartungsmodus** per Registry-Abfrage auf dem VDA. **Medico Update-Version** live abgerufen (mit Rot-Markierung bei veralteten Versionen). Farbige EXE/DLL/Ausnahmecode/OOM-Hervorhebungen. 🔄 Auto-Refresh per `-Interval`, 🔔 Piepton bei neuen Events, 🔍 interaktive Filter im Browser. 🎛️ Alle Schwellwerte als Variablen anpassbar. 📖 [Doku →](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/System-Status-Report) |
+| [`System-Status-Application-Fehler-Report.ps1`](./Citrix/System-Status-Application-Fehler-Report.ps1) | Erweiterter System-Status-Report – sammelt **Application Error/Hang/Popup**, **Service Control Manager** (Dienstabstürze) und **Windows Resource Exhaustion** (Speichermangel) von allen Servern einer OU. 🟢🟡🔴 Ampelanzeige für Speicherplatz D:, mcsdif.vhdx-Größe, freien Arbeitsspeicher, **CPU-Auslastung**, **Auslagerungsdatei** und **FSLogix-Dienststatus**. Zeigt aktive **Citrix Sessions**, **TOP 10 Speicherfresser** (WorkingSet) und **TOP 10 Session-RAM** (nach Benutzer gruppiert). **Citrix CVAD Registration** (Registered/Unregistered/Registering) + **Wartungsmodus** per Registry-Abfrage auf dem VDA. **WEM Sync** mit Alterserkennung (>8h = rot). **Medico Update-Version** live abgerufen (mit Rot-Markierung bei veralteten Versionen). Fettschrift (font-weight:700) in allen Ampeln. Farbige EXE/DLL/Ausnahmecode/OOM-Hervorhebungen. 🔄 Auto-Refresh per `-Interval`, 🔔 Piepton bei neuen Events, 🔍 interaktive Filter im Browser. 🎛️ Alle Schwellwerte als Variablen anpassbar. 📖 [Doku →](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/System-Status-Report) |
 | [`Optimierung_Citrix_PVS.ps1`](./Citrix/Optimierung_Citrix_PVS.ps1) | Netzwerk- und Windows-Optimierung für Citrix PVS Target Devices. Deaktiviert Offload-Features (Checksum, Jumbo Packet), NIC-Energieverwaltung (3-Stufen-Fallback), IPv6, NetBIOS, Task Offload. Setzt Energieplan auf Höchstleistung, deaktiviert Ruhezustand. 🗃️ Vollständiges JSON-Backup + 🔄 **Rollback** aller Änderungen. 📖 [Doku →](https://github.com/RoccoAmmon/ScriptsScriptsScripts/wiki/Citrix-PVS-Optimierung) |
 
 ### 📧 Outlook
@@ -51,6 +51,8 @@
 | FSLogix & weitere Dienste (Cortex, WEM, Broker) | ✅ | – | – |
 | Citrix CVAD Registration + Wartungsmodus | ✅ | – | – |
 | Medico Update-Version (live abgerufen) | ✅ | – | – |
+| WEM Sync Alterserkennung (>8h = rot) | ✅ | – | – |
+| Fettschrift (font-weight:700) in Ampeln | ✅ | – | – |
 | Auto-Refresh (Intervall-Modus) | ✅ | – | – |
 | TOP 10 Auswertungen (Prozesse, Session-RAM) | ✅ | – | – |
 | In-Page-Modal für Prozessdetails | ✅ | – | – |

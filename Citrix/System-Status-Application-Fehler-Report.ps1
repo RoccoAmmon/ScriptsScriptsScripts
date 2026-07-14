@@ -35,11 +35,10 @@
     .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -DaysBack 14
 
 .NOTES
-    Version  : 1.12
+    Version  : 1.13
     Autor    : Rocco Ammon
-    Änderung : Citrix CVAD Registration + Wartungsmodus per Registry (State\Registered,
-               Policies\DesktopServer\MaintenanceMode). Kompakte Spaltenköpfe.
-               Keine Broker/Controller-Abfrage mehr nötig.
+    Änderung : WEM Sync Alterserkennung (>8h = rot). Fettschrift (font-weight:700) in Ampeln.
+               CSS/HTML-Syntax korrigiert.
 #>
 
 [CmdletBinding()]
@@ -165,6 +164,7 @@ try {
                 PageFileMB       = $null; PageFileTotalMB = $null; PageFileUsagePct = $null
                 FslogixServices  = @()
                 MedicoUpdateId   = $null
+                WemSync          = $null
                 CitrixRegistered = $null
                 CitrixMaintenance = $null
             }
@@ -225,7 +225,7 @@ try {
 
         $f = Get-Item 'D:\mcsdif.vhdx' -ErrorAction SilentlyContinue
         $vhdxExists = if ($f) { $true } else { $false }
-        $vhdxSizeGB = if ($f) { [math]::Round($f.Length / 1GB, 2) } else { $null }
+        $vhdxSizeGB = if ($f) { [math]::Round($f.Length / 1GB) } else { $null }
 
         $top = @()
         try {
@@ -255,7 +255,7 @@ try {
         $cpuPct = $null
         try {
             $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop
-            if ($cpu) { $cpuPct = [math]::Round(($cpu | Measure-Object -Property LoadPercentage -Average).Average, 1) }
+            if ($cpu) { $cpuPct = [math]::Round(($cpu | Measure-Object -Property LoadPercentage -Average).Average) }
         } catch {}
 
         $pfAllocatedMB = $null; $pfCurrentMB = $null; $pfUsagePct = $null
@@ -264,7 +264,7 @@ try {
             if ($pageFile) {
                 $pfAllocatedMB = ($pageFile | Measure-Object -Property AllocatedBaseSize -Sum).Sum
                 $pfCurrentMB   = ($pageFile | Measure-Object -Property CurrentUsage -Sum).Sum
-                $pfUsagePct    = if ($pfAllocatedMB -gt 0) { [math]::Round(($pfCurrentMB / $pfAllocatedMB) * 100, 1) } else { $null }
+                $pfUsagePct    = if ($pfAllocatedMB -gt 0) { [math]::Round(($pfCurrentMB / $pfAllocatedMB) * 100) } else { $null }
             }
         } catch {}
 
@@ -296,6 +296,14 @@ try {
             } catch {}
         }
 
+        $wemSync = $null
+        try {
+            $wemEvents = Get-WinEvent -FilterHashtable @{LogName='WEM Agent Service'; Id=6007} -MaxEvents 1 -ErrorAction SilentlyContinue
+            if ($wemEvents) {
+                $wemSync = $wemEvents[0].TimeCreated.ToString('HH:mm')
+            }
+        } catch {}
+
         # Citrix CVAD Registration + MaintenanceMode via Registry
         $citrixRegistered = $null
         $citrixMaintenance = $null
@@ -316,9 +324,9 @@ try {
         } catch {}
 
         if ($drive) {
-            $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
-            $totalGB = [math]::Round($drive.Size / 1GB, 2)
-            $freePct = if ($drive.Size -gt 0) { [math]::Round(($drive.FreeSpace / $drive.Size) * 100, 1) } else { 0 }
+            $freeGB  = [math]::Round($drive.FreeSpace / 1GB)
+            $totalGB = [math]::Round($drive.Size / 1GB)
+            $freePct = if ($drive.Size -gt 0) { [math]::Round(($drive.FreeSpace / $drive.Size) * 100) } else { 0 }
         } else { $freeGB = $null; $totalGB = $null; $freePct = $null }
 
         [PSCustomObject]@{
@@ -332,7 +340,7 @@ try {
             VhdxSizeGB       = $vhdxSizeGB
             MemFreeMB        = if ($mem) { [math]::Round($mem.FreePhysicalMemory / 1024, 1) } else { $null }
             MemTotalMB       = if ($mem) { [math]::Round($mem.TotalVisibleMemorySize / 1024, 1) } else { $null }
-            MemFreePct       = if ($mem -and $mem.TotalVisibleMemorySize -gt 0) { [math]::Round(($mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize) * 100, 1) } else { $null }
+            MemFreePct       = if ($mem -and $mem.TotalVisibleMemorySize -gt 0) { [math]::Round(($mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize) * 100) } else { $null }
             Sessions         = $sessionCount
             TopProcs         = $top
             SessionRAM       = $sessionRAM
@@ -342,6 +350,7 @@ try {
             PageFileUsagePct = $pfUsagePct
             FslogixServices  = $fslogixServices
             MedicoUpdateId   = $medicoUpdateId
+            WemSync          = $wemSync
             CitrixRegistered = $citrixRegistered
             CitrixMaintenance = $citrixMaintenance
         }
@@ -393,6 +402,7 @@ try {
             PageFileUsagePct     = $result.PageFileUsagePct
             FslogixServices      = $result.FslogixServices
             MedicoUpdateId       = $result.MedicoUpdateId
+            WemSync              = $result.WemSync
             CitrixRegistered     = $result.CitrixRegistered
             CitrixMaintenance    = $result.CitrixMaintenance
         })
@@ -475,10 +485,20 @@ try {
     [void]$StyleBlock.AppendLine('    .filterBar select { padding: 6px; border: 1px solid #ccc; border-radius: 4px; min-width: 180px; }')
     [void]$StyleBlock.AppendLine('    #searchBox { width: 300px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }')
     [void]$StyleBlock.AppendLine('    table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }')
-    [void]$StyleBlock.AppendLine('    th { background-color: #007acc; color: white; padding: 8px; text-align: left; cursor: pointer; user-select: none; }')
-    [void]$StyleBlock.AppendLine('    th::after { content: " \25B4\25BE"; font-size: 16px; opacity: 0.3; }')
-    [void]$StyleBlock.AppendLine('    th.asc::after { content: " \25B4"; opacity: 1; }')
-    [void]$StyleBlock.AppendLine('    th.desc::after { content: " \25BE"; opacity: 1; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable { table-layout: auto; width: auto; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(1), #ampelTable td:nth-child(1) { width: 150px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(2), #ampelTable td:nth-child(2) { width: 90px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(3), #ampelTable td:nth-child(3) { width: 65px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(n+4):nth-child(-n+7), #ampelTable td:nth-child(n+4):nth-child(-n+7) { width: 60px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(8), #ampelTable td:nth-child(8) { width: 90px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(9), #ampelTable td:nth-child(9) { width: 60px; overflow: hidden; text-align: center; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(10), #ampelTable td:nth-child(10) { width: 220px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(11), #ampelTable td:nth-child(11) { width: 70px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(12), #ampelTable td:nth-child(12) { width: 70px; overflow: hidden; text-align: center; }')
+    [void]$StyleBlock.AppendLine('    th { background-color: #007acc; color: white; padding: 8px; text-align: left; cursor: pointer; user-select: none; vertical-align: top; }')
+    [void]$StyleBlock.AppendLine('    th::after { content: " \25B4\25BE"; display: block; font-size: 14px; opacity: 0.3; line-height: 1.2; margin-top: 2px; }')
+    [void]$StyleBlock.AppendLine('    th.asc::after { content: " \25B4"; display: block; font-size: 14px; opacity: 1; line-height: 1.2; margin-top: 2px; }')
+    [void]$StyleBlock.AppendLine('    th.desc::after { content: " \25BE"; display: block; font-size: 14px; opacity: 1; line-height: 1.2; margin-top: 2px; }')
     [void]$StyleBlock.AppendLine('    td { padding: 6px 8px; border-bottom: 1px solid #ddd; vertical-align: top; }')
     [void]$StyleBlock.AppendLine('    tr:nth-child(even) { background-color: #f5f5f5; }')
     [void]$StyleBlock.AppendLine('    tr:hover { background-color: #e0f0ff; }')
@@ -488,7 +508,7 @@ try {
     [void]$StyleBlock.AppendLine('    .level-Offline { border-left: 4px solid #95a5a6; color: #999; }')
     [void]$StyleBlock.AppendLine('    td.msg { max-width: 600px; word-wrap: break-word; }')
     [void]$StyleBlock.AppendLine('    .hidden { display: none; }')
-    [void]$StyleBlock.AppendLine('    .ampel { display: inline-block; padding: 3px 12px; border-radius: 4px; font-weight: 600; font-size: 13px; min-width: 110px; text-align: center; }')
+    [void]$StyleBlock.AppendLine('    .ampel { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; padding: 3px 12px; border-radius: 4px; font-weight: 700; font-size: 14px; min-width: 110px; }')
     [void]$StyleBlock.AppendLine('    .ampel-green { background-color: #27ae60; color: white; }')
     [void]$StyleBlock.AppendLine('    .ampel-yellow { background-color: #f39c12; color: white; }')
     [void]$StyleBlock.AppendLine('    .ampel-red { background-color: #e74c3c; color: white; }')
@@ -501,6 +521,7 @@ try {
     [void]$StyleBlock.AppendLine('    span.dll { background-color: #f8d7da; color: #000; font-weight: 700; padding: 1px 4px; border-radius: 3px; }')
     [void]$StyleBlock.AppendLine('    span.excode { background-color: #fff3cd; color: #000; font-weight: 700; padding: 1px 4px; border-radius: 3px; }')
     [void]$StyleBlock.AppendLine('    #topTable td:first-child, #sessionRamTable td:first-child { font-weight: 700; color: #007acc; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable td:nth-child(n+4):nth-child(-n+8) .ampel { min-width: auto; width: 100%; padding: 3px 4px; font-size: 12px; box-sizing: border-box; }')
     [void]$StyleBlock.AppendLine('    #topTable td:nth-child(5), #sessionRamTable td:nth-child(5) { font-weight: 700; text-align: right; }')
     [void]$StyleBlock.AppendLine('    .sessions { text-align: center; font-weight: 600; }')
     [void]$StyleBlock.AppendLine('    td.sessions-highlight { background-color: #e8f4fd; font-weight: 600; }')
@@ -704,16 +725,16 @@ try {
     if ($HasDrives) {
         [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
         [void]$Html.AppendLine('    <table id="ampelTable">')
-        $medicoHeader = if ($EnableMedicoCheck) { '<th>Medico</th>' } else { '' }
-        [void]$Html.AppendLine('        <tr><th>Server</th><th>Registriert</th><th>Wartung</th><th>Freier Speicher D:</th><th>mcsdif.vhdx</th><th>Freier Arbeitsspeicher</th><th>CPU %</th><th>Auslagerungsdatei</th><th>Sessions</th><th>Dienste</th>' + $medicoHeader + '</tr>')
+        $medicoHeader = if ($EnableMedicoCheck) { '<th>Medico</th><th>WEM Sync</th>' } else { '<th>WEM Sync</th>' }
+        [void]$Html.AppendLine('        <tr><th>Server</th><th>Registriert</th><th>Wartung</th><th>Frei D:</th><th>mcsdif</th><th>Frei RAM</th><th>CPU %</th><th>Pagefile</th><th>Sessions</th><th>Dienste</th>' + $medicoHeader + '</tr>')
 
         foreach ($drv in ($DriveResults | Sort-Object Server)) {
             $serverName = $drv.Server
 
             if ($drv.FreePct -ne $null) {
-                if ($drv.FreePct -lt $ThresholdDiskFreeRed)      { $ampelSpeicher = 'ampel-red';    $statusSpeicher = "$($drv.FreePct)% frei" }
-                elseif ($drv.FreePct -lt $ThresholdDiskFreeYellow)  { $ampelSpeicher = 'ampel-yellow'; $statusSpeicher = "$($drv.FreePct)% frei" }
-                else                          { $ampelSpeicher = 'ampel-green';  $statusSpeicher = "$($drv.FreePct)% frei" }
+                if ($drv.FreePct -lt $ThresholdDiskFreeRed)      { $ampelSpeicher = 'ampel-red';    $statusSpeicher = "$($drv.FreePct)%" }
+                elseif ($drv.FreePct -lt $ThresholdDiskFreeYellow)  { $ampelSpeicher = 'ampel-yellow'; $statusSpeicher = "$($drv.FreePct)%" }
+                else                          { $ampelSpeicher = 'ampel-green';  $statusSpeicher = "$($drv.FreePct)%" }
             } else { $ampelSpeicher = 'ampel-gray'; $statusSpeicher = 'n/a' }
 
             if ($drv.VhdxExists -and $drv.VhdxSizeGB -ne $null) {
@@ -724,9 +745,9 @@ try {
             else { $ampelDatei = 'ampel-gray'; $statusDatei = 'Datei fehlt' }
 
             if ($drv.MemFreePct -ne $null) {
-                if ($drv.MemFreePct -lt $ThresholdMemFreeRed)     { $ampelMem = 'ampel-red';    $statusMem = "$($drv.MemFreePct)% frei" }
-                elseif ($drv.MemFreePct -lt $ThresholdMemFreeYellow) { $ampelMem = 'ampel-yellow'; $statusMem = "$($drv.MemFreePct)% frei" }
-                else                            { $ampelMem = 'ampel-green';  $statusMem = "$($drv.MemFreePct)% frei" }
+                if ($drv.MemFreePct -lt $ThresholdMemFreeRed)     { $ampelMem = 'ampel-red';    $statusMem = "$($drv.MemFreePct)%" }
+                elseif ($drv.MemFreePct -lt $ThresholdMemFreeYellow) { $ampelMem = 'ampel-yellow'; $statusMem = "$($drv.MemFreePct)%" }
+                else                            { $ampelMem = 'ampel-green';  $statusMem = "$($drv.MemFreePct)%" }
             } else { $ampelMem = 'ampel-gray'; $statusMem = 'n/a' }
 
             # CPU-Ampel
@@ -738,17 +759,17 @@ try {
 
             # Pagefile-Ampel
             if ($drv.PageFileUsagePct -ne $null) {
-                if ($drv.PageFileUsagePct -ge $ThresholdPageFileRed)      { $ampelPf = 'ampel-red';    $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
-                elseif ($drv.PageFileUsagePct -ge $ThresholdPageFileYellow)  { $ampelPf = 'ampel-yellow'; $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
-                else                                   { $ampelPf = 'ampel-green';  $statusPf = "$($drv.PageFileMB) MB ($($drv.PageFileUsagePct)%)" }
+                if ($drv.PageFileUsagePct -ge $ThresholdPageFileRed)      { $ampelPf = 'ampel-red';    $statusPf = "$([math]::Round($drv.PageFileMB / 1024)) GB ($($drv.PageFileUsagePct)%)" }
+                elseif ($drv.PageFileUsagePct -ge $ThresholdPageFileYellow)  { $ampelPf = 'ampel-yellow'; $statusPf = "$([math]::Round($drv.PageFileMB / 1024)) GB ($($drv.PageFileUsagePct)%)" }
+                else                                   { $ampelPf = 'ampel-green';  $statusPf = "$([math]::Round($drv.PageFileMB / 1024)) GB ($($drv.PageFileUsagePct)%)" }
             } else { $ampelPf = 'ampel-gray'; $statusPf = 'n/a' }
 
             if ($drv.Sessions -and $drv.Sessions -gt 0) {
                 if ($drv.Sessions -ge $ThresholdSessionRed)      { $ampelS = 'ampel-red' }
                 elseif ($drv.Sessions -ge $ThresholdSessionYellow)  { $ampelS = 'ampel-yellow' }
                 else                           { $ampelS = 'ampel-green' }
-                $sessionDisplay = "<span class=""ampel $ampelS"" style=""font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$($drv.Sessions)</span>"
-            } else { $sessionDisplay = '<span class="ampel ampel-gray" style="font-size:12px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
+                $sessionDisplay = "<span class=""ampel $ampelS"" style=""font-weight:700;font-size:13px;min-width:auto;padding:2px 10px;cursor:default"">$($drv.Sessions)</span>"
+            } else { $sessionDisplay = '<span class="ampel ampel-gray" style="font-weight:700;font-size:13px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
 
             # FSLogix-Status als Ampeln
             $fslHtml = ''
@@ -759,35 +780,46 @@ try {
                     $isRunning = $svc.Status -eq 'Running' -or $svc.Status -eq 4
                     $ampelClass = if ($isRunning) { 'ampel-green' } else { 'ampel-red' }
                     $label = if ($nameMap.ContainsKey($svc.Name)) { $nameMap[$svc.Name] } else { $svc.DisplayName }
-                    $svcBoxes += "<span class=""ampel $ampelClass"" title=""$($svc.DisplayName) ($($svc.Status))"" style=""font-size:11px;min-width:auto;padding:2px 8px;cursor:default"">$label</span>"
+                    $svcBoxes += "<span class=""ampel $ampelClass"" title=""$($svc.DisplayName) ($($svc.Status))"" style=""font-weight:700;font-size:12px;min-width:auto;padding:2px 8px;cursor:default"">$label</span>"
                 }
                 $fslHtml = $svcBoxes -join ' '
             }
-            if (-not $fslHtml) { $fslHtml = '<span class="ampel ampel-gray" style="font-size:11px">keine</span>' }
+            if (-not $fslHtml) { $fslHtml = '<span class="ampel ampel-gray" style="font-weight:700;font-size:12px">keine</span>' }
 
             $medicoCell = ''
             if ($EnableMedicoCheck) {
                 if ($drv.MedicoUpdateId) {
                     $medicoAmpel = if ($maxMedicoId -and $drv.MedicoUpdateId -ne $maxMedicoId) { 'ampel-red' } else { 'ampel-green' }
-                    $medicoDisplay = "<span class=""ampel $medicoAmpel"" style=""font-weight:600;font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$($drv.MedicoUpdateId)</span>"
+                    $medicoDisplay = "<span class=""ampel $medicoAmpel"" style=""font-weight:700;font-size:13px;min-width:auto;padding:2px 10px;cursor:default"">$($drv.MedicoUpdateId)</span>"
                 } else { $medicoDisplay = '-' }
                 $medicoCell = '<td style="text-align:center">' + $medicoDisplay + '</td>'
+            } else { $medicoCell = '' }
+
+            # WEM Sync
+            if ($drv.WemSync) {
+                $wemTime = [datetime]::ParseExact($drv.WemSync, 'HH:mm', $null)
+                $now = Get-Date
+                $timeDiff = $now - $wemTime.Date.AddHours($wemTime.Hour).AddMinutes($wemTime.Minute)
+                $ampelWem = if ($timeDiff.TotalHours -gt 8) { 'ampel-red' } else { 'ampel-green' }
+                $wemCell = '<td style="text-align:center"><span class="ampel ' + $ampelWem + '" style="font-weight:700;font-size:12px;min-width:auto;padding:2px 10px;cursor:default">' + $drv.WemSync + '</span></td>'
+            } else {
+                $wemCell = '<td style="text-align:center"><span class="ampel ampel-gray" style="font-weight:700;font-size:12px;min-width:auto;padding:2px 10px;cursor:default">-</span></td>'
             }
 
             # Citrix CVAD-Registrierung + Wartungsmodus
             if ($drv.CitrixRegistered -ne $null) {
                 $regState = $drv.CitrixRegistered
                 $ampelReg = if ($regState -eq 'Registered') { 'ampel-green' } elseif ($regState -eq 'Unregistered') { 'ampel-red' } else { 'ampel-yellow' }
-                $regDisplay = "<span class=""ampel $ampelReg"" style=""font-size:11px;min-width:auto;padding:2px 10px;cursor:default"">$regState</span>"
-            } else { $regDisplay = '<span class="ampel ampel-gray" style="font-size:11px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
+                $regDisplay = "<span class=""ampel $ampelReg"" style=""font-weight:700;font-size:12px;min-width:auto;padding:2px 10px;cursor:default"">$regState</span>"
+            } else { $regDisplay = '<span class="ampel ampel-gray" style="font-weight:700;font-size:12px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
 
             if ($drv.CitrixMaintenance -eq $true) {
-                $maintDisplay = '<span class="ampel ampel-yellow" style="font-size:11px;min-width:auto;padding:2px 10px;cursor:default">Wartung</span>'
+                $maintDisplay = '<span class="ampel ampel-yellow" style="font-weight:700;font-size:12px;min-width:auto;padding:2px 10px;cursor:default">Wartung</span>'
             } elseif ($drv.CitrixMaintenance -eq $false) {
-                $maintDisplay = '<span class="ampel ampel-green" style="font-size:11px;min-width:auto;padding:2px 10px;cursor:default">Nein</span>'
-            } else { $maintDisplay = '<span class="ampel ampel-gray" style="font-size:11px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
+                $maintDisplay = '<span class="ampel ampel-green" style="font-weight:700;font-size:12px;min-width:auto;padding:2px 10px;cursor:default">Nein</span>'
+            } else { $maintDisplay = '<span class="ampel ampel-gray" style="font-weight:700;font-size:12px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
 
-            [void]$Html.AppendLine("        <tr><td>$serverName</td><td>$regDisplay</td><td>$maintDisplay</td><td><span class=""ampel $ampelSpeicher"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"">$statusDatei</span></td><td><span class=""ampel $ampelMem"">$statusMem</span></td><td><span class=""ampel $ampelCpu"">$statusCpu</span></td><td><span class=""ampel $ampelPf"">$statusPf</span></td><td>$sessionDisplay</td><td style=""font-size:12px;white-space:nowrap"">$fslHtml</td>$medicoCell</tr>")
+            [void]$Html.AppendLine("        <tr><td>$serverName</td><td>$regDisplay</td><td>$maintDisplay</td><td><span class=""ampel $ampelSpeicher"" style=""font-weight:700"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"" style=""font-weight:700"">$statusDatei</span></td><td><span class=""ampel $ampelMem"" style=""font-weight:700"">$statusMem</span></td><td><span class=""ampel $ampelCpu"" style=""font-weight:700"">$statusCpu</span></td><td><span class=""ampel $ampelPf"" style=""font-weight:700"">$statusPf</span></td><td>$sessionDisplay</td><td style=""white-space:nowrap"">$fslHtml</td>$medicoCell$wemCell</tr>")
         }
         [void]$Html.AppendLine('    </table>')
     }
