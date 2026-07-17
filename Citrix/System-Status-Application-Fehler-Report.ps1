@@ -35,10 +35,10 @@
     .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -DaysBack 14
 
 .NOTES
-    Version  : 1.13
+    Version  : 1.14
     Autor    : Rocco Ammon
-    Änderung : WEM Sync Alterserkennung (>8h = rot). Fettschrift (font-weight:700) in Ampeln.
-               CSS/HTML-Syntax korrigiert.
+    Änderung : Medico-Tabelle wird bei $EnableMedicoCheck=$false komplett übersprungen
+               (Datenaufbereitung + HTML-Ausgabe).
 #>
 
 [CmdletBinding()]
@@ -82,7 +82,7 @@ $ThresholdPageFileYellow = 75   # Pagefile-Auslastung über X% = gelb
 $ThresholdSessionRed     = 14   # Sessions über X = rot
 $ThresholdSessionYellow  = 11   # Sessions über X = gelb
 $EnableMedicoCheck       = $true
-$ThrottleLimit           = 15   # Parallele Server-Abfragen (Invoke-Command)
+$ThrottleLimit           = 20   # Parallele Server-Abfragen (Invoke-Command)
 
 function Write-Log {
     param(
@@ -164,9 +164,13 @@ try {
                 PageFileMB       = $null; PageFileTotalMB = $null; PageFileUsagePct = $null
                 FslogixServices  = @()
                 MedicoUpdateId   = $null
+                MedicoLogs       = @()
                 WemSync          = $null
                 CitrixRegistered = $null
                 CitrixMaintenance = $null
+                FreeCGB          = $null
+                TotalCGB         = $null
+                FreeCPct         = $null
             }
         }
 
@@ -210,8 +214,9 @@ try {
             catch {}
         }
 
-        $drive = $null; $mem = $null; $sessionCount = 0
+        $drive = $null; $driveC = $null; $mem = $null; $sessionCount = 0
         try { $drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='D:'" -ErrorAction Stop } catch {}
+        try { $driveC = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop } catch {}
         try { $mem   = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop } catch {}
 
         try {
@@ -278,12 +283,26 @@ try {
         } catch {}
 
         $medicoUpdateId = $null
+        $medicoLogs = @()
         if ($using:EnableMedicoCheck) {
             try {
                 $logDir = 'Y:\updateservice.log'
                 if (Test-Path -Path $logDir -PathType Container -ErrorAction SilentlyContinue) {
-                    $latestFile = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' -ErrorAction SilentlyContinue |
-                        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                    $todayStr = (Get-Date).ToString('yyyyMMdd')
+                    $logFiles = Get-ChildItem -Path $logDir -Filter 'medicoupdateservice_update_*.txt' -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime.ToString('yyyyMMdd') -eq $todayStr } |
+                        Sort-Object LastWriteTime
+                    foreach ($lf in $logFiles) {
+                        $content = Get-Content -Path $lf.FullName -ErrorAction SilentlyContinue
+                        $updateLine = $content | Where-Object { $_ -match "updateid\s+'(.+?)'" } | Select-Object -Last 1
+                        if ($updateLine -and $updateLine -match "updateid\s+'(.+?)'") {
+                            $medicoLogs += [PSCustomObject]@{
+                                Time     = $lf.LastWriteTime.ToString('HH:mm')
+                                UpdateId = $matches[1]
+                            }
+                        }
+                    }
+                    $latestFile = $logFiles | Select-Object -Last 1
                     if ($latestFile) {
                         $updateLine = Get-Content -Path $latestFile.FullName -ErrorAction SilentlyContinue |
                             Where-Object { $_ -match "updateid\s+'(.+?)'" } |
@@ -329,6 +348,12 @@ try {
             $freePct = if ($drive.Size -gt 0) { [math]::Round(($drive.FreeSpace / $drive.Size) * 100) } else { 0 }
         } else { $freeGB = $null; $totalGB = $null; $freePct = $null }
 
+        if ($driveC) {
+            $freeCGB  = [math]::Round($driveC.FreeSpace / 1GB)
+            $totalCGB = [math]::Round($driveC.Size / 1GB)
+            $freeCPct = if ($driveC.Size -gt 0) { [math]::Round(($driveC.FreeSpace / $driveC.Size) * 100) } else { 0 }
+        } else { $freeCGB = $null; $totalCGB = $null; $freeCPct = $null }
+
         [PSCustomObject]@{
             Computer         = $env:COMPUTERNAME
             Reachable        = $true
@@ -350,9 +375,13 @@ try {
             PageFileUsagePct = $pfUsagePct
             FslogixServices  = $fslogixServices
             MedicoUpdateId   = $medicoUpdateId
+            MedicoLogs       = $medicoLogs
             WemSync          = $wemSync
             CitrixRegistered = $citrixRegistered
             CitrixMaintenance = $citrixMaintenance
+            FreeCGB          = $freeCGB
+            TotalCGB         = $totalCGB
+            FreeCPct         = $freeCPct
         }
     }
 
@@ -402,9 +431,13 @@ try {
             PageFileUsagePct     = $result.PageFileUsagePct
             FslogixServices      = $result.FslogixServices
             MedicoUpdateId       = $result.MedicoUpdateId
+            MedicoLogs           = $result.MedicoLogs
             WemSync              = $result.WemSync
             CitrixRegistered     = $result.CitrixRegistered
             CitrixMaintenance    = $result.CitrixMaintenance
+            FreeCGB              = $result.FreeCGB
+            TotalCGB             = $result.TotalCGB
+            FreeCPct             = $result.FreeCPct
         })
 
         if ($result.TopProcs -and $result.TopProcs.Count -gt 0) {
@@ -437,8 +470,63 @@ try {
     $Top10         = $TopProcesses | Sort-Object WS_MB -Descending | Select-Object -First 10
     $TopSessionRAM = $SessionRAMResults | Sort-Object SessionRAM_MB -Descending | Select-Object -First 10
 
-    $maxMedicoId = $DriveResults | Where-Object { $_.MedicoUpdateId } |
-        ForEach-Object { $_.MedicoUpdateId } | Sort-Object -Descending | Select-Object -First 1
+    $medicoServers = [System.Collections.ArrayList]::new()
+    $medicoGroupDefs = @()
+    if ($EnableMedicoCheck) {
+        $maxMedicoId = $DriveResults | Where-Object { $_.MedicoUpdateId } |
+            ForEach-Object { $_.MedicoUpdateId } | Sort-Object -Descending | Select-Object -First 1
+
+        # Medico-Logs aller Server als Kreuztabelle (Spalten = Zeitgruppen, max 30min Abstand)
+        $medicoTimeColumns = [System.Collections.ArrayList]::new()
+        $medicoLookup = @{}
+        foreach ($drv in $DriveResults) {
+            if ($drv.MedicoLogs -and $drv.MedicoLogs.Count -gt 0) {
+                [void]$medicoServers.Add($drv.Server)
+                $serverLogs = @{}
+                foreach ($log in $drv.MedicoLogs) {
+                    $serverLogs[$log.Time] = $log.UpdateId
+                    if ($log.Time -notin $medicoTimeColumns) { [void]$medicoTimeColumns.Add($log.Time) }
+                }
+                $medicoLookup[$drv.Server] = $serverLogs
+            }
+        }
+        $medicoTimeColumns = $medicoTimeColumns | Sort-Object
+
+        # Zeitgruppen bilden: ≤30min Abstand UND gleiche Version(en) → eine Spalte
+        $timeVersionFingerprint = @{}
+        foreach ($t in $medicoTimeColumns) {
+            $versionsAtTime = @{}
+            foreach ($srv in $medicoServers) {
+                $srvLogs = $medicoLookup[$srv]
+                if ($srvLogs.ContainsKey($t)) { $versionsAtTime[$srvLogs[$t]] = $true }
+            }
+            $fingerprint = ($versionsAtTime.Keys | Sort-Object) -join '|'
+            $timeVersionFingerprint[$t] = $fingerprint
+        }
+
+        $medicoGroups = [System.Collections.ArrayList]::new()
+        if ($medicoTimeColumns.Count -gt 0) {
+            $currentGroup = @($medicoTimeColumns[0])
+            for ($i = 1; $i -lt $medicoTimeColumns.Count; $i++) {
+                $prevTime = [datetime]::ParseExact($medicoTimeColumns[$i - 1], 'HH:mm', $null)
+                $currTime = [datetime]::ParseExact($medicoTimeColumns[$i], 'HH:mm', $null)
+                $sameVersion = $timeVersionFingerprint[$medicoTimeColumns[$i - 1]] -eq $timeVersionFingerprint[$medicoTimeColumns[$i]]
+                if (($currTime - $prevTime).TotalMinutes -le 30 -and $sameVersion) {
+                    $currentGroup += $medicoTimeColumns[$i]
+                } else {
+                    [void]$medicoGroups.Add($currentGroup)
+                    $currentGroup = @($medicoTimeColumns[$i])
+                }
+            }
+            if ($currentGroup.Count -gt 0) { [void]$medicoGroups.Add($currentGroup) }
+        }
+
+        # Gruppen-Label und Mapping erstellen
+        foreach ($grp in $medicoGroups) {
+            $label = if ($grp.Count -eq 1) { $grp[0] } else { $grp[0] + '-' + $grp[-1] }
+            $medicoGroupDefs += [PSCustomObject]@{ Label = $label; Times = $grp }
+        }
+    }
 
     # =====================================================================
     # Region: Neue-Einträge-Erkennung (Piepton)
@@ -489,12 +577,17 @@ try {
     [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(1), #ampelTable td:nth-child(1) { width: 150px; overflow: hidden; }')
     [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(2), #ampelTable td:nth-child(2) { width: 90px; overflow: hidden; }')
     [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(3), #ampelTable td:nth-child(3) { width: 65px; overflow: hidden; }')
-    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(n+4):nth-child(-n+7), #ampelTable td:nth-child(n+4):nth-child(-n+7) { width: 60px; overflow: hidden; }')
-    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(8), #ampelTable td:nth-child(8) { width: 90px; overflow: hidden; }')
-    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(9), #ampelTable td:nth-child(9) { width: 60px; overflow: hidden; text-align: center; }')
-    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(10), #ampelTable td:nth-child(10) { width: 220px; overflow: hidden; }')
-    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(11), #ampelTable td:nth-child(11) { width: 70px; overflow: hidden; }')
-    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(12), #ampelTable td:nth-child(12) { width: 70px; overflow: hidden; text-align: center; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(4), #ampelTable td:nth-child(4) { width: 60px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(n+5):nth-child(-n+8), #ampelTable td:nth-child(n+5):nth-child(-n+8) { width: 60px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(9), #ampelTable td:nth-child(9) { width: 90px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(10), #ampelTable td:nth-child(10) { width: 60px; overflow: hidden; text-align: center; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(11), #ampelTable td:nth-child(11) { width: 220px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(12), #ampelTable td:nth-child(12) { width: 70px; overflow: hidden; }')
+    [void]$StyleBlock.AppendLine('    #ampelTable th:nth-child(13), #ampelTable td:nth-child(13) { width: 70px; overflow: hidden; text-align: center; }')
+    [void]$StyleBlock.AppendLine('    #medicoTable { width: auto; min-width: 400px; }')
+    [void]$StyleBlock.AppendLine('    #medicoTable th, #medicoTable td { white-space: nowrap; padding: 4px 10px; }')
+    [void]$StyleBlock.AppendLine('    #medicoTable td:first-child { font-weight: 700; color: #007acc; }')
+    [void]$StyleBlock.AppendLine('    #medicoTable code { font-size: 12px; background: #eef; padding: 2px 6px; border-radius: 3px; }')
     [void]$StyleBlock.AppendLine('    th { background-color: #007acc; color: white; padding: 8px; text-align: left; cursor: pointer; user-select: none; vertical-align: top; }')
     [void]$StyleBlock.AppendLine('    th::after { content: " \25B4\25BE"; display: block; font-size: 14px; opacity: 0.3; line-height: 1.2; margin-top: 2px; }')
     [void]$StyleBlock.AppendLine('    th.asc::after { content: " \25B4"; display: block; font-size: 14px; opacity: 1; line-height: 1.2; margin-top: 2px; }')
@@ -726,10 +819,16 @@ try {
         [void]$Html.AppendLine('    <h2>Statusübersicht</h2>')
         [void]$Html.AppendLine('    <table id="ampelTable">')
         $medicoHeader = if ($EnableMedicoCheck) { '<th>Medico</th><th>WEM Sync</th>' } else { '<th>WEM Sync</th>' }
-        [void]$Html.AppendLine('        <tr><th>Server</th><th>Registriert</th><th>Wartung</th><th>Frei D:</th><th>mcsdif</th><th>Frei RAM</th><th>CPU %</th><th>Pagefile</th><th>Sessions</th><th>Dienste</th>' + $medicoHeader + '</tr>')
+        [void]$Html.AppendLine('        <tr><th>Server</th><th>Registriert</th><th>Wartung</th><th>Frei C:</th><th>Frei D:</th><th>mcsdif</th><th>Frei RAM</th><th>CPU %</th><th>Pagefile</th><th>Sessions</th><th>Dienste</th>' + $medicoHeader + '</tr>')
 
         foreach ($drv in ($DriveResults | Sort-Object Server)) {
             $serverName = $drv.Server
+
+            if ($drv.FreeCPct -ne $null) {
+                if ($drv.FreeCPct -lt $ThresholdDiskFreeRed)      { $ampelSpeicherC = 'ampel-red';    $statusSpeicherC = "$($drv.FreeCPct)%" }
+                elseif ($drv.FreeCPct -lt $ThresholdDiskFreeYellow)  { $ampelSpeicherC = 'ampel-yellow'; $statusSpeicherC = "$($drv.FreeCPct)%" }
+                else                           { $ampelSpeicherC = 'ampel-green';  $statusSpeicherC = "$($drv.FreeCPct)%" }
+            } else { $ampelSpeicherC = 'ampel-gray'; $statusSpeicherC = 'n/a' }
 
             if ($drv.FreePct -ne $null) {
                 if ($drv.FreePct -lt $ThresholdDiskFreeRed)      { $ampelSpeicher = 'ampel-red';    $statusSpeicher = "$($drv.FreePct)%" }
@@ -819,7 +918,34 @@ try {
                 $maintDisplay = '<span class="ampel ampel-green" style="font-weight:700;font-size:12px;min-width:auto;padding:2px 10px;cursor:default">Nein</span>'
             } else { $maintDisplay = '<span class="ampel ampel-gray" style="font-weight:700;font-size:12px;min-width:auto;padding:2px 10px;cursor:default">-</span>' }
 
-            [void]$Html.AppendLine("        <tr><td>$serverName</td><td>$regDisplay</td><td>$maintDisplay</td><td><span class=""ampel $ampelSpeicher"" style=""font-weight:700"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"" style=""font-weight:700"">$statusDatei</span></td><td><span class=""ampel $ampelMem"" style=""font-weight:700"">$statusMem</span></td><td><span class=""ampel $ampelCpu"" style=""font-weight:700"">$statusCpu</span></td><td><span class=""ampel $ampelPf"" style=""font-weight:700"">$statusPf</span></td><td>$sessionDisplay</td><td style=""white-space:nowrap"">$fslHtml</td>$medicoCell$wemCell</tr>")
+            [void]$Html.AppendLine("        <tr><td>$serverName</td><td>$regDisplay</td><td>$maintDisplay</td><td><span class=""ampel $ampelSpeicherC"" style=""font-weight:700"">$statusSpeicherC</span></td><td><span class=""ampel $ampelSpeicher"" style=""font-weight:700"">$statusSpeicher</span></td><td><span class=""ampel $ampelDatei"" style=""font-weight:700"">$statusDatei</span></td><td><span class=""ampel $ampelMem"" style=""font-weight:700"">$statusMem</span></td><td><span class=""ampel $ampelCpu"" style=""font-weight:700"">$statusCpu</span></td><td><span class=""ampel $ampelPf"" style=""font-weight:700"">$statusPf</span></td><td>$sessionDisplay</td><td style=""white-space:nowrap"">$fslHtml</td>$medicoCell$wemCell</tr>")
+        }
+        [void]$Html.AppendLine('    </table>')
+    }
+
+    # ---- Medico Update-Tabelle (Kreuztabelle, ≤30min gruppiert) ----
+    if ($medicoServers -and $medicoServers.Count -gt 0) {
+        [void]$Html.AppendLine('    <h2>Medico Updates (heute)</h2>')
+        [void]$Html.AppendLine('    <table id="medicoTable">')
+        $headerCells = '<th>Server</th>'
+        foreach ($gd in $medicoGroupDefs) { $headerCells += "<th>$($gd.Label)</th>" }
+        [void]$Html.AppendLine("        <tr>$headerCells</tr>")
+        foreach ($srv in ($medicoServers | Sort-Object)) {
+            $rowCells = "<td>$srv</td>"
+            $srvLogs = $medicoLookup[$srv]
+            foreach ($gd in $medicoGroupDefs) {
+                $groupUpdates = @()
+                foreach ($t in $gd.Times) {
+                    if ($srvLogs.ContainsKey($t)) { $groupUpdates += $srvLogs[$t] }
+                }
+                if ($groupUpdates.Count -gt 0) {
+                    $cellContent = ($groupUpdates | ForEach-Object { "<code>$_</code>" }) -join '<br>'
+                    $rowCells += "<td>$cellContent</td>"
+                } else {
+                    $rowCells += '<td>-</td>'
+                }
+            }
+            [void]$Html.AppendLine("        <tr>$rowCells</tr>")
         }
         [void]$Html.AppendLine('    </table>')
     }
