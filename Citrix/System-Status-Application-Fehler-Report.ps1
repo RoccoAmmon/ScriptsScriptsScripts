@@ -1,26 +1,34 @@
 ﻿<#
 .SYNOPSIS
     Exportiert Application Error/Hang/Popup, Service Control Manager, Windows Resource Exhaustion
-    Eventlog-Einträge aller Server einer OU als HTML.
+    Eventlog-Einträge aller Server aus einer oder mehreren OUs als HTML.
 
 .DESCRIPTION
-    Sammelt von allen Servern in einer angegebenen OU die Eventlog-Einträge mit den Quellen
+    Sammelt von allen Servern aus einer oder mehreren OUs die Eventlog-Einträge mit den Quellen
     "Application Error", "Application Hang", "Application Popup", "Service Control Manager" und
     "Windows Resource Exhaustion" und exportiert sie
-    übersichtlich als HTML-Datei (Uhrzeit, Server, Fehler). Bei Angabe von -Interval läuft
-    das Skript durchgehend und aktualisiert die HTML im angegebenen Minuten-Takt; die HTML-Seite
-    aktualisiert sich dann automatisch im Browser. Zusätzlich werden freier Speicherplatz D:,
-    Größe der mcsdif.vhdx und freier Arbeitsspeicher als Ampelanzeige (rot/gelb/grün) dargestellt.
+    übersichtlich als HTML-Datei (Uhrzeit, Server, Fehler). Die OUs können entweder per Kommandozeile
+    (mehrere mit Semikolon getrennt) oder über eine grafische AD-Auswahl (-ShowOUPicker) angegeben werden.
+    Bei Angabe von -Interval läuft das Skript durchgehend und aktualisiert die HTML im angegebenen
+    Minuten-Takt; die HTML-Seite aktualisiert sich dann automatisch im Browser.
+    Zusätzlich werden freier Speicherplatz C: und D:, Größe der mcsdif.vhdx und freier Arbeitsspeicher
+    als Ampelanzeige (rot/gelb/grün) dargestellt.
     Fehlermeldungen enthalten
     farbige Hervorhebungen: EXE-Pfade (grün), DLL-Pfade (rot), Ausnahmecodes (gelb) und
     "Nicht genügend virtueller Speicher" (rot). Zeigt aktive Citrix Sessions pro Server,
     CPU-Auslastung, Auslagerungsdatei-Belegung und FSLogix-Dienststatus (farbig).
+    Citrix CVAD-Registrierungsstatus und Wartungsmodus werden pro Server angezeigt.
     TOP 10 der größten Speicherfresser (WorkingSet) sowie eine TOP 10
     des Session-RAM (nach Benutzer gruppiert) aller Server an.
     Klick auf die Prozess-Anzahl öffnet die Prozessliste in einem In-Page-Modal (kein Popup!).
 
 .PARAMETER SearchBase
-    DistinguishedName der OU, in der nach Servern gesucht wird.
+    DistinguishedName einer oder mehrerer OUs, in der/denen nach Servern gesucht wird.
+    Mehrere OUs per Semikolon trennen: "OU=A,DC=dom;OU=B,DC=dom"
+
+.PARAMETER ShowOUPicker
+    Öffnet eine GUI zur Auswahl mehrerer OUs aus der AD-Struktur.
+    Überschreibt -SearchBase, wenn angegeben.
 
 .PARAMETER OutputPath
     Pfad zur Ausgabe-HTML-Datei. Standard: Skriptverzeichnis\SystemStatusReport.html
@@ -34,17 +42,28 @@
 .EXAMPLE
     .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=domain,DC=local" -DaysBack 14
 
+.EXAMPLE
+    Mehrere OUs per Semikolon:
+    .\System-Status-Application-Fehler-Report.ps1 -SearchBase "OU=Servers,DC=dom,DC=local;OU=VDI,DC=dom,DC=local"
+
+.EXAMPLE
+    AD-Struktur-GUI zur Auswahl:
+    .\System-Status-Application-Fehler-Report.ps1 -ShowOUPicker
+
 .NOTES
-    Version  : 1.14
+    Version  : 1.16
     Autor    : Rocco Ammon
-    Änderung : Medico-Tabelle wird bei $EnableMedicoCheck=$false komplett übersprungen
-               (Datenaufbereitung + HTML-Ausgabe).
+    Änderung : Mehrere OUs via -SearchBase (Semikolon-getrennt) oder -ShowOUPicker (GUI) auswählbar.
+               C:-Laufwerk-Ampel ergänzt, Citrix-Registrierung/Wartungsmodus ergänzt.
 #>
 
 [CmdletBinding()]
 param (
-    [Parameter(Mandatory = $true)]
-    [string]$SearchBase,
+    [Parameter(Mandatory = $false)]
+    [string[]]$SearchBase,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ShowOUPicker,
 
     [Parameter(Mandatory = $false)]
     [string]$OutputPath,
@@ -84,6 +103,121 @@ $ThresholdSessionYellow  = 11   # Sessions über X = gelb
 $EnableMedicoCheck       = $true
 $ThrottleLimit           = 20   # Parallele Server-Abfragen (Invoke-Command)
 
+# =========================================================================
+# Region: GUI-Funktion zur OU-Auswahl
+# =========================================================================
+function Show-OUPicker {
+    <#
+    .SYNOPSIS
+        Öffnet eine GUI mit einer TreeView der AD-Organisationseinheiten.
+        Zurückgegeben werden die DistinguishedNames der ausgewählten OUs.
+    #>
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "AD OUs auswählen"
+    $form.Size = New-Object System.Drawing.Size(450, 650)
+    $form.StartPosition = "CenterScreen"
+    $form.MinimumSize = $form.Size
+
+    $treeView = New-Object System.Windows.Forms.TreeView
+    $treeView.Dock = "Fill"
+    $treeView.CheckBoxes = $true
+    $treeView.HideSelection = $false
+
+    $btnPanel = New-Object System.Windows.Forms.Panel
+    $btnPanel.Dock = "Bottom"
+    $btnPanel.Height = 50
+    $btnPanel.Padding = New-Object System.Windows.Forms.Padding(8)
+
+    $infoLabel = New-Object System.Windows.Forms.Label
+    $infoLabel.Dock = "Top"
+    $infoLabel.Text = "Gewünschte OUs per Checkbox markieren – OK zum Bestätigen"
+    $infoLabel.TextAlign = "MiddleCenter"
+    $infoLabel.Height = 30
+    $infoLabel.BackColor = "LightYellow"
+
+    $okButton = New-Object System.Windows.Forms.Button
+    $okButton.Text = "OK"
+    $okButton.DialogResult = "OK"
+    $okButton.Size = New-Object System.Drawing.Size(100, 32)
+    $okButton.Location = New-Object System.Drawing.Point(110, 9)
+
+    $cancelButton = New-Object System.Windows.Forms.Button
+    $cancelButton.Text = "Abbrechen"
+    $cancelButton.DialogResult = "Cancel"
+    $cancelButton.Size = New-Object System.Drawing.Size(100, 32)
+    $cancelButton.Location = New-Object System.Drawing.Point(230, 9)
+
+    $btnPanel.Controls.Add($okButton)
+    $btnPanel.Controls.Add($cancelButton)
+
+    $form.Controls.Add($treeView)
+    $form.Controls.Add($btnPanel)
+    $form.Controls.Add($infoLabel)
+
+    # Rekursive Funktion zum Befüllen des TreeViews
+    function Add-ADOUNodes {
+        param(
+            [System.Windows.Forms.TreeNode]$ParentNode,
+            [string]$DN
+        )
+        try {
+            $ous = Get-ADOrganizationalUnit -Filter * -SearchBase $DN -SearchScope OneLevel `
+                -Properties Name, DistinguishedName -ErrorAction SilentlyContinue |
+                Sort-Object Name
+            foreach ($ou in $ous) {
+                $node = New-Object System.Windows.Forms.TreeNode
+                $node.Text = $ou.Name
+                $node.Tag = $ou.DistinguishedName
+                $ParentNode.Nodes.Add($node) | Out-Null
+                Add-ADOUNodes -ParentNode $node -DN $ou.DistinguishedName
+            }
+        }
+        catch {}
+    }
+
+    # Root-Knoten: Domäne
+    $rootNode = New-Object System.Windows.Forms.TreeNode
+    try {
+        $domain = Get-ADDomain
+        $rootNode.Text = $domain.DistinguishedName
+        $rootNode.Tag = $domain.DistinguishedName
+        $treeView.Nodes.Add($rootNode) | Out-Null
+        Add-ADOUNodes -ParentNode $rootNode -DN $domain.DistinguishedName
+        $rootNode.Expand()
+    }
+    catch {
+        $rootNode.Text = "AD nicht erreichbar"
+        $treeView.Nodes.Add($rootNode) | Out-Null
+    }
+
+    $result = $form.ShowDialog()
+
+    # Ausgewählte OUs einsammeln
+    $selectedOUs = [System.Collections.ArrayList]::new()
+    function Collect-CheckedNodes {
+        param([System.Windows.Forms.TreeNode]$Node)
+        if ($Node.Checked -and $Node.Tag) {
+            [void]$selectedOUs.Add($Node.Tag)
+        }
+        foreach ($child in $Node.Nodes) {
+            Collect-CheckedNodes -Node $child
+        }
+    }
+    foreach ($node in $treeView.Nodes) {
+        Collect-CheckedNodes -Node $node
+    }
+
+    $form.Dispose()
+
+    if ($result -eq 'OK') {
+        return $selectedOUs
+    }
+    return $null
+}
+
 function Write-Log {
     param(
         [string]$Message,
@@ -99,7 +233,25 @@ function Write-Log {
     }
 }
 
-Write-Log "Skriptstart. SearchBase='$SearchBase', DaysBack=$DaysBack, Interval=$Interval"
+# --- OU-Liste ermitteln: entweder via -SearchBase oder -ShowOUPicker ---
+if ($ShowOUPicker) {
+    $selected = Show-OUPicker
+    if (-not $selected -or $selected.Count -eq 0) {
+        Write-Warning "Keine OUs ausgewählt – Skript wird beendet."
+        Write-Log   "Keine OUs ausgewählt – Skriptende" 'WARN'
+        exit
+    }
+    $SearchBase = $selected
+}
+elseif (-not $SearchBase -or $SearchBase.Count -eq 0) {
+    Write-Error "Es muss mindestens eine OU via -SearchBase oder -ShowOUPicker angegeben werden."
+    Write-Log   "Keine OU angegeben – Skriptende" 'ERROR'
+    exit
+}
+
+# Semikolon als zusätzliches Trennzeichen, damit die Kommas im DN nicht stören
+$ouList = @($SearchBase) | ForEach-Object { $_ -split ';' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+Write-Log "Skriptstart. OUs: $($ouList -join '; '), DaysBack=$DaysBack, Interval=$Interval"
 
 do {
 try {
@@ -114,28 +266,42 @@ try {
     )
 
     # =====================================================================
-    # Region: AD abfragen
+    # Region: AD abfragen (über mehrere OUs)
     # =====================================================================
-    Write-Host "Suche Computer in OU: $SearchBase ..." -ForegroundColor Cyan
-    Write-Log  "Suche Computer in OU: $SearchBase"
-    try {
-        $Computers = Get-ADComputer -Filter 'enabled -eq "true"' -SearchBase $SearchBase `
-            -Properties Name -ErrorAction Stop | Select-Object -ExpandProperty Name
+    Write-Host "Suche Computer in folgenden OUs: $($ouList -join ', ')" -ForegroundColor Cyan
+    Write-Log  "Suche Computer in $($ouList.Count) OUs"
+
+    $Computers = [System.Collections.ArrayList]::new()
+    foreach ($ou in $ouList) {
+        Write-Host "  -> Durchsuche OU: $ou" -ForegroundColor DarkCyan
+        try {
+            $found = Get-ADComputer -Filter 'enabled -eq "true"' -SearchBase $ou `
+                -Properties Name -ErrorAction Stop | Select-Object -ExpandProperty Name
+            if ($found) {
+                Write-Host "     $($found.Count) Server gefunden" -ForegroundColor DarkGreen
+                foreach ($c in $found) {
+                    if ($c -notin $Computers) { [void]$Computers.Add($c) }
+                }
+            }
+            else {
+                Write-Warning "Keine Computer in OU: $ou"
+                Write-Log     "Keine Computer in OU: $ou" 'WARN'
+            }
+        }
+        catch {
+            Write-Warning "Fehler bei AD-Abfrage für OU '$ou': $_"
+            Write-Log   "Fehler bei AD-Abfrage für OU '$ou': $($_.Exception.Message)" 'WARN'
+        }
     }
-    catch {
-        Write-Error "Fehler bei AD-Abfrage: $_"
-        Write-Log   "Fehler bei AD-Abfrage: $($_.Exception.Message)" 'ERROR'
+
+    if ($Computers.Count -eq 0) {
+        Write-Warning "Keine Computer in den angegebenen OUs gefunden."
+        Write-Log     "Keine Computer in den angegebenen OUs gefunden." 'WARN'
         break
     }
 
-    if (-not $Computers) {
-        Write-Warning "Keine Computer in der angegebenen OU gefunden."
-        Write-Log     "Keine Computer in der angegebenen OU gefunden." 'WARN'
-        break
-    }
-
-    Write-Host "$($Computers.Count) Server gefunden, starte parallele Abfragen (ThrottleLimit=$ThrottleLimit) ..." -ForegroundColor Cyan
-    Write-Log  "$($Computers.Count) Server gefunden."
+    Write-Host "$($Computers.Count) Server gesamt, starte parallele Abfragen (ThrottleLimit=$ThrottleLimit) ..." -ForegroundColor Cyan
+    Write-Log  "$($Computers.Count) Server gesamt."
 
     # =====================================================================
     # Region: Parallele Server-Abfragen via Invoke-Command
